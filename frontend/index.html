@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Financial Bot</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>💰 Financial Bot</h1>
+        <p>Ask me anything about finance and investments!</p>
+      </header>
+
+      <div class="chat-container">
+        <div id="chat-messages" class="chat-messages">
+          <div class="message bot-message">
+            <div class="message-content">
+              Hello! I'm your Financial Bot. Ask me any question about finance,
+              investments, or the stock market.
+            </div>
+          </div>
+        </div>
+
+        <div class="input-container">
+          <input
+            type="text"
+            id="message-input"
+            placeholder="Type your financial question here..."
+            maxlength="500"
+          />
+          <button id="send-button" type="button">
+            <span>Send</span>
+          </button>
+        </div>
+
+        <div id="loading" class="loading hidden">
+          <div class="spinner"></div>
+          <span>Thinking...</span>
+        </div>
+      </div>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>

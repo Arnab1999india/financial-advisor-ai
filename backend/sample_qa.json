@@ -1,0 +1,102 @@
+[
+  {
+    "question": "What is the stock market?",
+    "answer": "The stock market is a collection of exchanges and venues where shares of publicly listed companies are bought and sold. Major exchanges include the NYSE and NASDAQ. It serves as a mechanism for companies to raise capital and for investors to participate in corporate growth.",
+    "category": "basics"
+  },
+  {
+    "question": "What is a mutual fund?",
+    "answer": "A mutual fund pools money from many investors to purchase a diversified portfolio of stocks, bonds, or other securities. It is managed by professional fund managers and offers retail investors access to a diversified portfolio with lower capital requirements.",
+    "category": "investment_vehicles"
+  },
+  {
+    "question": "What is diversification?",
+    "answer": "Diversification is a risk management strategy that spreads investments across different asset classes, sectors, and geographies to reduce exposure to any single risk. The principle is that a portfolio of varied assets will, on average, yield higher returns and carry lower risk than any individual holding.",
+    "category": "risk_management"
+  },
+  {
+    "question": "What is compound interest?",
+    "answer": "Compound interest is interest calculated on both the initial principal and the accumulated interest from previous periods. It allows wealth to grow exponentially over time. For example, $1,000 at 10% annual compound interest becomes $2,594 after 10 years.",
+    "category": "basics"
+  },
+  {
+    "question": "What is an ETF?",
+    "answer": "An Exchange-Traded Fund (ETF) is a basket of securities that tracks an index, sector, commodity, or asset class and trades on a stock exchange like a regular share. ETFs offer diversification, low costs, and intraday liquidity. Popular examples include SPY (S&P 500) and QQQ (NASDAQ-100).",
+    "category": "investment_vehicles"
+  },
+  {
+    "question": "What is a bond?",
+    "answer": "A bond is a fixed-income debt instrument issued by governments or corporations to raise capital. The issuer pays periodic interest (coupon) to bondholders and returns the principal at maturity. Bonds are generally considered less risky than stocks but offer lower potential returns.",
+    "category": "investment_vehicles"
+  },
+  {
+    "question": "What is inflation?",
+    "answer": "Inflation is the rate at which the general price level of goods and services rises over time, eroding purchasing power. Central banks typically target a 2% annual inflation rate. Investors hedge against inflation through assets like equities, real estate, commodities, and inflation-linked bonds (TIPS).",
+    "category": "macroeconomics"
+  },
+  {
+    "question": "What is a bull market?",
+    "answer": "A bull market is a financial market condition characterised by rising prices, typically defined as a 20% or more increase from recent lows. Bull markets are driven by strong economic growth, low unemployment, and high investor confidence. The longest US bull market ran from 2009 to 2020.",
+    "category": "market_concepts"
+  },
+  {
+    "question": "What is a bear market?",
+    "answer": "A bear market is a sustained period of declining asset prices, conventionally defined as a 20% or more drop from recent highs over at least two months. Bear markets are associated with economic slowdowns, rising unemployment, and investor pessimism.",
+    "category": "market_concepts"
+  },
+  {
+    "question": "What is dollar-cost averaging?",
+    "answer": "Dollar-cost averaging (DCA) is an investment strategy where a fixed amount of money is invested at regular intervals regardless of asset price. When prices are low, more units are purchased; when prices are high, fewer units are bought. Over time, this lowers the average cost per unit and reduces the impact of volatility.",
+    "category": "strategies"
+  },
+  {
+    "question": "What is the P/E ratio?",
+    "answer": "The Price-to-Earnings (P/E) ratio measures a company's current share price relative to its earnings per share (EPS). A high P/E suggests investors expect strong future growth; a low P/E may indicate undervaluation or slow growth. The S&P 500 has historically averaged a P/E of around 15–20.",
+    "category": "valuation"
+  },
+  {
+    "question": "What is market capitalisation?",
+    "answer": "Market capitalisation (market cap) is the total market value of a company's outstanding shares, calculated as share price × number of shares. Companies are categorised as large-cap (>$10B), mid-cap ($2B–$10B), and small-cap (<$2B). Large-caps are generally less volatile than small-caps.",
+    "category": "basics"
+  },
+  {
+    "question": "What is a dividend?",
+    "answer": "A dividend is a portion of a company's earnings distributed to shareholders, typically paid quarterly in cash. Dividend yield is the annual dividend per share divided by the share price. Dividend-paying stocks (e.g. utility and consumer staples companies) are popular for income-focused investors.",
+    "category": "basics"
+  },
+  {
+    "question": "What is short selling?",
+    "answer": "Short selling is a trading strategy where an investor borrows shares and sells them, hoping to buy them back later at a lower price and profit from the difference. It carries unlimited loss potential (a stock can theoretically rise infinitely) and is used for speculation or hedging.",
+    "category": "trading"
+  },
+  {
+    "question": "What is the RSI indicator?",
+    "answer": "The Relative Strength Index (RSI) is a momentum oscillator that measures the speed and magnitude of recent price changes on a scale of 0–100. An RSI above 70 signals overbought conditions (potential sell), while below 30 signals oversold conditions (potential buy). It was developed by J. Welles Wilder in 1978.",
+    "category": "technical_analysis"
+  },
+  {
+    "question": "What is the MACD indicator?",
+    "answer": "Moving Average Convergence Divergence (MACD) is a trend-following momentum indicator. It consists of the MACD line (12-period EMA minus 26-period EMA), signal line (9-period EMA of MACD), and histogram. A bullish crossover (MACD crosses above signal line) is a buy signal; bearish crossover is a sell signal.",
+    "category": "technical_analysis"
+  },
+  {
+    "question": "What are Bollinger Bands?",
+    "answer": "Bollinger Bands consist of a 20-period simple moving average (middle band) flanked by upper and lower bands set 2 standard deviations away. When price touches the lower band, the market may be oversold (buy signal); when it touches the upper band, it may be overbought (sell signal). Narrow bands indicate low volatility ('squeeze').",
+    "category": "technical_analysis"
+  },
+  {
+    "question": "What is risk management in trading?",
+    "answer": "Risk management in trading involves strategies to limit potential losses: position sizing (never risk more than 1–2% of capital per trade), stop-loss orders, diversification, and maintaining a favourable risk-reward ratio (typically at least 1:2). Proper risk management is more important than picking winning trades.",
+    "category": "risk_management"
+  },
+  {
+    "question": "What is an IPO?",
+    "answer": "An Initial Public Offering (IPO) is the process by which a private company offers shares to the public for the first time on a stock exchange. Companies use IPOs to raise capital for growth. IPO stocks can be volatile in early trading as the market establishes fair value.",
+    "category": "market_concepts"
+  },
+  {
+    "question": "What is portfolio rebalancing?",
+    "answer": "Portfolio rebalancing is the process of realigning the weightings of assets in a portfolio to maintain the original desired level of asset allocation. For example, if equities outperform and grow from 60% to 70% of the portfolio, rebalancing involves selling equities and buying bonds to restore the 60/40 split.",
+    "category": "strategies"
+  }
+]

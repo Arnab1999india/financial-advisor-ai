@@ -1,0 +1,34 @@
+# Web framework
+fastapi
+uvicorn
+
+# LangChain ecosystem
+langchain
+langchain-core
+langchain-community
+langchain-huggingface
+langchain-google-genai
+langgraph
+
+# Google Gemini
+google-generativeai
+
+# Embeddings & vector store
+sentence-transformers
+faiss-cpu
+
+# Validation & settings
+pydantic
+pydantic-settings
+
+# Data processing
+pandas
+numpy
+openpyxl
+python-multipart
+tabula-py
+pandas-ta==0.3.14b0
+
+# Testing
+pytest
+httpx
