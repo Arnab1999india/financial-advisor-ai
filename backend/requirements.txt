@@ -27,8 +27,10 @@ numpy
 openpyxl
 python-multipart
 tabula-py
-pandas-ta==0.3.14b0
+pandas-ta
+# Web search fallback (DuckDuckGo; Tavily optional)
+duckduckgo-search
+tavily-python
 
-# Testing
-pytest
-httpx
+# Live market quotes (NSE/BSE equities, precious-metal futures, crypto)
+yfinance

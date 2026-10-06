@@ -59,10 +59,20 @@ def run_analysis(df: pd.DataFrame, strategy_name: str, data_type: str) -> dict:
         raise ValueError(f"Invalid strategy: {strategy_name}")
 
     strategy_func = STRATEGIES[strategy_name]
-    result_df = strategy_func(df.copy(), data_type)
+    result = strategy_func(df.copy())
 
-    buy_signals = result_df[result_df['buy_signal']].to_dict('records')
-    sell_signals = result_df[result_df['sell_signal']].to_dict('records')
+    if isinstance(result, pd.DataFrame):
+        if "buy_signal" not in result.columns or "sell_signal" not in result.columns:
+            raise ValueError("Strategy DataFrame must contain buy_signal and sell_signal columns.")
+
+        buy_signals = result[result["buy_signal"]].to_dict("records")
+        sell_signals = result[result["sell_signal"]].to_dict("records")
+    elif isinstance(result, dict):
+        signal = result.get("signal", "NONE")
+        buy_signals = [result] if signal == "BUY" else []
+        sell_signals = [result] if signal == "SELL" else []
+    else:
+        raise ValueError("Strategy must return either a DataFrame or a signal dictionary.")
 
     return {
         "strategy": strategy_name,

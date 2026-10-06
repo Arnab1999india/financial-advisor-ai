@@ -73,5 +73,28 @@ def get_available_trading_strategies() -> str:
     return json.dumps(strategies, indent=2)
 
 
+@tool
+def search_web_for_finance(query: str) -> str:
+    """Search the public web for financial context when the knowledge base is insufficient.
+
+    Use this after internal retrieval fails to cover the question.
+
+    Args:
+        query: The financial question to search for.
+
+    Returns:
+        Formatted web snippets, or a message indicating nothing was found.
+    """
+    from tools.web_search import format_web_context, search_web
+
+    hits = search_web(query)
+    context = format_web_context(hits)
+    return context or "No relevant web results found."
+
+
 # Exported list used when building the tool-calling agent
-FINANCIAL_TOOLS = [search_financial_knowledge, get_available_trading_strategies]
+FINANCIAL_TOOLS = [
+    search_financial_knowledge,
+    get_available_trading_strategies,
+    search_web_for_finance,
+]

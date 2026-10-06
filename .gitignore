@@ -1,8 +1,10 @@
 # Ignore environment variables (API keys)
 .env
+.env.*
 
 # Ignore Python virtual environments
-venv/
+.venv/
+
 __pycache__/
 
 # Ignore OS-specific files

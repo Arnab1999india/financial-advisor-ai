@@ -86,3 +86,4 @@ query → [router] → financial_qa → [rag_retrieve] → [gemini_generate] →
 | [`docs/API_CONTRACTS.md`](docs/API_CONTRACTS.md) | All endpoints, schemas, error codes, cURL examples |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | ASCII architecture diagrams, tech stack table |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Local dev, Docker, Gunicorn, env vars reference |
+| [`docs/TESTING_AND_RAG_ACCURACY.md`](docs/TESTING_AND_RAG_ACCURACY.md) | Manual test cases, RAG accuracy protocol, token-efficiency checks, and current test findings |
