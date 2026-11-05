@@ -102,6 +102,10 @@ def source_chunks_payload(chunks: list[dict]) -> list[dict]:
                 "source_timestamp": chunk.get("source_timestamp") or chunk.get("retrieved_at") or "",
                 "source_url": chunk.get("source_url") or chunk.get("url") or None,
                 "source_type": chunk.get("source_type") or "faiss",
+                "source_file": chunk.get("source_file"),
+                "page": chunk.get("page"),
+                "section": chunk.get("section"),
+                "document_date": chunk.get("document_date") or chunk.get("source_timestamp"),
             }
         )
     return payload

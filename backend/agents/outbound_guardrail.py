@@ -17,6 +17,7 @@ import re
 
 from langchain_core.messages import AIMessage, HumanMessage, RemoveMessage, SystemMessage
 
+from agents.llm_client import invoke_llm
 from agents.state import AgentState
 from config import settings
 from logger import logger
@@ -145,12 +146,15 @@ def _rewrite_with_flash(answer: str) -> tuple[str, dict | None]:
             model=settings.cheap_model,
             temperature=0.0,
             google_api_key=api_key,
+            max_output_tokens=settings.llm_max_output_tokens_flash,
         )
-        response = llm.invoke(
+        response = invoke_llm(
+            llm,
             [
                 SystemMessage(content=_REWRITE_SYSTEM_PROMPT),
                 HumanMessage(content=f"Rewrite this assistant reply:\n\n{answer}"),
-            ]
+            ],
+            node="outbound_guardrail",
         )
         rewritten = (response.content or "").strip()
         event = make_token_event("outbound_guardrail", settings.cheap_model, response)

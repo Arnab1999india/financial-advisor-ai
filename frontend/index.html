@@ -24,15 +24,23 @@
         </div>
 
         <div class="input-container">
-          <input
-            type="text"
-            id="message-input"
-            placeholder="Type your financial question here..."
-            maxlength="500"
-          />
-          <button id="send-button" type="button">
-            <span>Send</span>
-          </button>
+          <div class="input-stack">
+            <div class="input-row">
+              <textarea
+                id="message-input"
+                placeholder="Type your question… (Enter to send, Shift+Enter for new line)"
+                maxlength="500"
+                rows="2"
+              ></textarea>
+              <!-- Mic / voice UI paused — see voice-recognition.js, chat-voice-input.js
+              <button id="mic-button" type="button" class="mic-button" ...></button>
+              -->
+              <button id="send-button" type="button">
+                <span>Send</span>
+              </button>
+            </div>
+            <!-- <p id="voice-hint" class="voice-hint hidden" role="status">Speak in English</p> -->
+          </div>
         </div>
 
         <div id="loading" class="loading hidden">
@@ -42,6 +50,10 @@
       </div>
     </div>
 
+    <!-- Voice scripts kept for later; not loaded while mic is disabled
+    <script src="voice-recognition.js"></script>
+    <script src="chat-voice-input.js"></script>
+    -->
     <script src="script.js"></script>
   </body>
 </html>

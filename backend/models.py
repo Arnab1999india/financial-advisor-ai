@@ -1,11 +1,36 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import List, Optional, Dict, Any
+
+from config import settings
+from validation.text import TextValidationError, validate_user_query
 
 
 class QueryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     query: str
     session_id: Optional[str] = None  # Reserved for multi-turn conversation support
     user_id: Optional[str] = None     # Enables Cognitive Memory System when provided
+
+    @field_validator("query")
+    @classmethod
+    def validate_query_field(cls, value: str) -> str:
+        try:
+            return validate_user_query(
+                value,
+                min_len=settings.query_min_length,
+                max_len=settings.query_max_length,
+            )
+        except TextValidationError as exc:
+            raise ValueError(str(exc)) from exc
+
+    @field_validator("session_id", "user_id")
+    @classmethod
+    def strip_optional_ids(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
 
 
 class TokenCallEvent(BaseModel):
@@ -59,10 +84,30 @@ class ApprovalCard(BaseModel):
 
 
 class ApprovalResumeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     thread_id: str
     decision: str  # "approve" | "reject"
     params: Optional[Dict[str, Any]] = None
     notes: Optional[str] = None
+
+    @field_validator("thread_id", "decision")
+    @classmethod
+    def required_non_empty(cls, value: str) -> str:
+        cleaned = (value or "").strip()
+        if not cleaned:
+            raise ValueError("Field is required.")
+        return cleaned
+
+    @field_validator("notes")
+    @classmethod
+    def validate_notes(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if len(cleaned) > settings.query_max_length:
+            raise ValueError("Notes exceed maximum length.")
+        return cleaned or None
 
 
 class QueryResponse(BaseModel):
@@ -92,6 +137,9 @@ class AnalysisResponse(BaseModel):
     data_type: str
     buy_signals: List[Dict[str, Any]]
     sell_signals: List[Dict[str, Any]]
+    symbol: Optional[str] = None
+    exchange: Optional[str] = None
+    data_interval: Optional[str] = None
 
 
 class MemoryInfoResponse(BaseModel):

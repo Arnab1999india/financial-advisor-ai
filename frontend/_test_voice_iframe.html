@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 0 2px 4px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: #333;
+        background: transparent;
+      }
+      .field-label {
+        font-size: 14px;
+        font-weight: 600;
+        margin: 0 0 6px 2px;
+      }
+      .toast-region { min-height: 0; }
+      .toast {
+        margin: 0 0 8px;
+        padding: 10px 14px;
+        border-radius: 10px;
+        font-size: 13px;
+        background: #fff3e0;
+        color: #e65100;
+        border: 1px solid #ffcc80;
+      }
+      .input-stack { display: flex; flex-direction: column; gap: 6px; }
+      .input-row { display: flex; align-items: flex-end; gap: 10px; width: 100%; }
+      #message-input {
+        flex: 1;
+        padding: 12px 16px;
+        border: 1px solid #ddd;
+        border-radius: 18px;
+        font-size: 14px;
+        font-family: inherit;
+        outline: none;
+        resize: vertical;
+        min-height: 44px;
+        max-height: 160px;
+        line-height: 1.4;
+      }
+      #message-input:focus { border-color: #1976d2; }
+      #message-input.recording-active {
+        border-color: #c62828;
+        box-shadow: 0 0 0 2px rgba(198, 40, 40, 0.15);
+      }
+      .voice-hint {
+        margin: 0;
+        padding: 0 4px;
+        font-size: 12px;
+        color: #c62828;
+        font-weight: 500;
+      }
+      .hidden { display: none !important; }
+      .mic-button {
+        position: relative;
+        flex-shrink: 0;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border: 1px solid #ddd;
+        border-radius: 50%;
+        background: #fafafa;
+        color: #555;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .mic-button:hover:not(:disabled) {
+        background: #f0f4ff;
+        border-color: #1976d2;
+        color: #1976d2;
+      }
+      .mic-button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .mic-button.recording {
+        background: #ffebee;
+        border-color: #c62828;
+        color: #c62828;
+        animation: mic-pulse 1.2s ease-in-out infinite;
+      }
+      .mic-icon { width: 22px; height: 22px; }
+      .mic-recording-dot {
+        display: none;
+        position: absolute;
+        top: 6px;
+        right: 6px;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #c62828;
+      }
+      .mic-button.recording .mic-recording-dot { display: block; }
+      @keyframes mic-pulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(198, 40, 40, 0.35); }
+        50% { box-shadow: 0 0 0 6px rgba(198, 40, 40, 0); }
+      }
+      #send-button {
+        flex-shrink: 0;
+        padding: 12px 24px;
+        background: #1976d2;
+        color: white;
+        border: none;
+        border-radius: 25px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+      }
+      #send-button:hover:not(:disabled) { background: #1565c0; }
+      #send-button:disabled { background: #ccc; cursor: not-allowed; }
+    </style>
+    <script src="https://unpkg.com/streamlit-component-lib@1.4.0/dist/index.js"></script>
+  </head>
+  <body>
+    <p class="field-label">Your question</p>
+    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <div class="input-stack">
+      <div class="input-row">
+        <textarea
+          id="message-input"
+          placeholder="e.g., What is P/E ratio?"
+          maxlength="500"
+          rows="2"
+          aria-describedby="voice-hint mic-button"
+        ></textarea>
+        <button
+          id="mic-button"
+          type="button"
+          class="mic-button"
+          aria-pressed="false"
+          aria-label="Start voice input"
+          title="Transcribe spoken English into the message box"
+        >
+          <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path
+              fill="currentColor"
+              d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"
+            />
+          </svg>
+          <span class="mic-recording-dot" aria-hidden="true"></span>
+        </button>
+        <button id="send-button" type="button"><span>Send</span></button>
+      </div>
+      <p id="voice-hint" class="voice-hint hidden" role="status">Speak in English</p>
+    </div>
+
+    <script>
+      /**
+ * Browser Web Speech API wrapper for chat voice dictation (English, en-US).
+ * Keeps recognition logic separate from UI wiring in script.js.
+ */
+(function (global) {
+  "use strict";
+
+  const SpeechRecognition =
+    global.SpeechRecognition || global.webkitSpeechRecognition;
+
+  function isSupported() {
+    return Boolean(SpeechRecognition);
+  }
+
+  function joinSpeechParts(base, committed, interim) {
+    const prefix = base || "";
+    const middle = committed || "";
+    const tail = interim || "";
+    let combined = prefix;
+    if (middle) {
+      combined = combined
+        ? combined.replace(/\s+$/, "") + (/\s$/.test(combined) ? "" : " ") + middle.trimStart()
+        : middle;
+    }
+    if (tail) {
+      combined = combined
+        ? combined.replace(/\s+$/, "") + (/\s$/.test(combined) ? "" : " ") + tail.trimStart()
+        : tail;
+    }
+    return combined;
+  }
+
+  /**
+   * @param {object} options
+   * @param {(text: string) => void} options.onTranscriptChange
+   * @param {(recording: boolean) => void} [options.onRecordingChange]
+   * @param {(message: string) => void} [options.onError]
+   * @param {() => string} options.getInputValue
+   * @param {(value: string) => void} options.setInputValue
+   */
+  function createVoiceDictation(options) {
+    const {
+      onTranscriptChange,
+      onRecordingChange,
+      onError,
+      getInputValue,
+      setInputValue,
+    } = options;
+
+    let recognition = null;
+    let recording = false;
+    let dictationBase = "";
+    let applyingProgrammatically = false;
+    let pendingEnterSend = false;
+    let restartAfterStop = false;
+    let finalizeResolve = null;
+    let finalizePromise = null;
+
+    function notifyRecording(active) {
+      recording = active;
+      if (onRecordingChange) onRecordingChange(active);
+    }
+
+    function buildFromResults(event) {
+      let committed = "";
+      let interim = "";
+      for (let i = 0; i < event.results.length; i += 1) {
+        const piece = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          committed += piece;
+        }
+      }
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        if (!event.results[i].isFinal) {
+          interim += event.results[i][0].transcript;
+        }
+      }
+      return joinSpeechParts(dictationBase, committed, interim);
+    }
+
+    function applyTranscript(text) {
+      applyingProgrammatically = true;
+      setInputValue(text);
+      applyingProgrammatically = false;
+      if (onTranscriptChange) onTranscriptChange(text);
+    }
+
+    function attachRecognitionHandlers() {
+      recognition.onstart = () => {
+        notifyRecording(true);
+      };
+
+      recognition.onresult = (event) => {
+        const next = buildFromResults(event);
+        applyTranscript(next);
+      };
+
+      recognition.onerror = (event) => {
+        const code = event.error || "unknown";
+        let message = "Voice input failed. Please try again.";
+        if (code === "not-allowed" || code === "service-not-allowed") {
+          message = "Microphone access was denied. Allow the mic in your browser settings.";
+        } else if (code === "no-speech") {
+          message = "No speech was detected. Try speaking again.";
+        } else if (code === "network") {
+          message = "Voice recognition needs a network connection.";
+        } else if (code === "aborted") {
+          return;
+        }
+        if (onError) onError(message);
+        cleanupSession(false);
+      };
+
+      recognition.onend = () => {
+        notifyRecording(false);
+        if (finalizeResolve) {
+          finalizeResolve();
+          finalizeResolve = null;
+          finalizePromise = null;
+        }
+        if (restartAfterStop) {
+          restartAfterStop = false;
+          startRecognitionInstance(false);
+          return;
+        }
+        if (pendingEnterSend) {
+          pendingEnterSend = false;
+          if (options.onEnterSendAfterStop) {
+            options.onEnterSendAfterStop();
+          }
+        }
+      };
+    }
+
+    function cleanupSession(clearHandlers) {
+      notifyRecording(false);
+      restartAfterStop = false;
+      dictationBase = "";
+      if (clearHandlers && recognition) {
+        recognition.onstart = null;
+        recognition.onresult = null;
+        recognition.onerror = null;
+        recognition.onend = null;
+      }
+    }
+
+    function startRecognitionInstance(resetBase) {
+      if (!isSupported()) {
+        return { ok: false, error: "unsupported" };
+      }
+      if (resetBase) {
+        dictationBase = getInputValue();
+      }
+
+      recognition = new SpeechRecognition();
+      recognition.lang = "en-US";
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
+      attachRecognitionHandlers();
+
+      try {
+        recognition.start();
+      } catch {
+        cleanupSession(true);
+        if (onError) onError("Could not start voice input. Try again.");
+        return { ok: false, error: "start_failed" };
+      }
+      return { ok: true };
+    }
+
+    function start() {
+      if (recording) {
+        return { ok: false, error: "already_recording" };
+      }
+      if (!isSupported()) {
+        const msg =
+          "Voice input is not supported in this browser. Try Chrome or Edge on desktop.";
+        if (onError) onError(msg);
+        return { ok: false, error: "unsupported" };
+      }
+      return startRecognitionInstance(true);
+    }
+
+    function stop() {
+      if (!recognition || !recording) {
+        return Promise.resolve();
+      }
+      if (!finalizePromise) {
+        finalizePromise = new Promise((resolve) => {
+          finalizeResolve = resolve;
+        });
+      }
+      try {
+        recognition.stop();
+      } catch {
+        cleanupSession(false);
+        if (finalizeResolve) {
+          finalizeResolve();
+          finalizeResolve = null;
+          finalizePromise = null;
+        }
+      }
+      return finalizePromise;
+    }
+
+    function toggle() {
+      if (recording) {
+        return stop();
+      }
+      start();
+      return Promise.resolve();
+    }
+
+    function handleManualInputEdit() {
+      if (!recording || applyingProgrammatically || !recognition) {
+        return;
+      }
+      dictationBase = getInputValue();
+      restartAfterStop = true;
+      try {
+        recognition.stop();
+      } catch {
+        restartAfterStop = false;
+      }
+    }
+
+    function requestEnterSendWhileRecording() {
+      if (!recording) {
+        return false;
+      }
+      pendingEnterSend = true;
+      stop();
+      return true;
+    }
+
+    function destroy() {
+      pendingEnterSend = false;
+      if (recognition && recording) {
+        try {
+          recognition.stop();
+        } catch {
+          /* ignore */
+        }
+      }
+      cleanupSession(true);
+      recognition = null;
+    }
+
+    return {
+      isSupported,
+      start,
+      stop,
+      toggle,
+      isRecording: () => recording,
+      handleManualInputEdit,
+      requestEnterSendWhileRecording,
+      destroy,
+    };
+  }
+
+  global.VoiceDictation = {
+    isSupported,
+    create: createVoiceDictation,
+    joinSpeechParts,
+  };
+})(typeof window !== "undefined" ? window : globalThis);
+
+    </script>
+    <script>
+      /**
+ * Shared mic + textarea wiring for static chat and Streamlit iframe input.
+ */
+(function (global) {
+  "use strict";
+
+  /**
+   * @param {object} opts
+   * @param {HTMLTextAreaElement} opts.messageInput
+   * @param {HTMLButtonElement} opts.sendButton
+   * @param {HTMLButtonElement} opts.micButton
+   * @param {HTMLElement} opts.voiceHint
+   * @param {HTMLElement} opts.toastRegion
+   * @param {() => boolean} opts.getIsProcessing
+   * @param {(text: string) => void} opts.onSubmit
+   * @param {() => void} [opts.onResize]
+   */
+  function init(opts) {
+    const {
+      messageInput,
+      sendButton,
+      micButton,
+      voiceHint,
+      toastRegion,
+      getIsProcessing,
+      onSubmit,
+      onResize,
+    } = opts;
+
+    if (!messageInput || !sendButton) {
+      if (sendButton) {
+        sendButton.addEventListener("click", (e) => {
+          e.preventDefault();
+          if (messageInput && messageInput.value.trim()) onSubmit(messageInput.value.trim());
+        });
+      }
+      return { showToast: () => {}, setProcessingDisabled: () => {}, destroy: () => {} };
+    }
+
+    let toastTimer = null;
+    /** @type {ReturnType<typeof VoiceDictation.create> | null} */
+    let voiceDictation = null;
+
+    function notifyResize() {
+      if (onResize) onResize();
+    }
+
+    function showToast(message, durationMs = 5000) {
+      if (!toastRegion || !message) return;
+      if (toastTimer) {
+        clearTimeout(toastTimer);
+        toastTimer = null;
+      }
+      toastRegion.innerHTML = "";
+      const el = document.createElement("div");
+      el.className = "toast";
+      el.textContent = message;
+      toastRegion.appendChild(el);
+      notifyResize();
+      toastTimer = setTimeout(() => {
+        toastRegion.innerHTML = "";
+        toastTimer = null;
+        notifyResize();
+      }, durationMs);
+    }
+
+    function setRecordingUi(active) {
+      if (voiceHint) {
+        voiceHint.classList.toggle("hidden", !active);
+      }
+      if (micButton) {
+        micButton.classList.toggle("recording", active);
+        micButton.setAttribute("aria-pressed", active ? "true" : "false");
+        micButton.setAttribute(
+          "aria-label",
+          active ? "Stop voice input" : "Start voice input"
+        );
+      }
+      messageInput.classList.toggle("recording-active", active);
+      notifyResize();
+    }
+
+    function submitCurrent() {
+      const processing = getIsProcessing();
+      const text = messageInput.value.trim();
+      if (processing) return;
+      if (voiceDictation && voiceDictation.isRecording()) {
+        voiceDictation.requestEnterSendWhileRecording();
+        return;
+      }
+      if (!text) {
+        showToast("Please enter a question.");
+        return;
+      }
+      onSubmit(text);
+    }
+
+    if (!global.VoiceDictation) {
+      if (micButton) {
+        micButton.disabled = true;
+        micButton.title = "Voice input is not available";
+      }
+    } else if (!VoiceDictation.isSupported()) {
+      if (micButton) {
+        micButton.disabled = true;
+        micButton.title = "Voice input is not supported in this browser";
+      }
+    } else {
+      voiceDictation = VoiceDictation.create({
+        getInputValue: () => messageInput.value,
+        setInputValue: (value) => {
+          messageInput.value = value;
+        },
+        onRecordingChange: setRecordingUi,
+        onError: (message) => {
+          setRecordingUi(false);
+          showToast(message);
+        },
+        onEnterSendAfterStop: submitCurrent,
+      });
+    }
+
+    sendButton.addEventListener("click", (e) => {
+      e.preventDefault();
+      submitCurrent();
+    });
+
+    messageInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        submitCurrent();
+      }
+    });
+
+    messageInput.addEventListener("input", () => {
+      if (voiceDictation) {
+        voiceDictation.handleManualInputEdit();
+      }
+    });
+
+    if (micButton) {
+      micButton.addEventListener("click", (e) => {
+        e.preventDefault();
+        if (!voiceDictation || getIsProcessing()) return;
+        if (!VoiceDictation.isSupported()) {
+          showToast(
+            "Voice input is not supported in this browser. Try Chrome or Edge on desktop."
+          );
+          return;
+        }
+        if (voiceDictation.isRecording()) {
+          voiceDictation.stop();
+        } else {
+          voiceDictation.start();
+        }
+      });
+    }
+
+    global.addEventListener("beforeunload", () => {
+      if (voiceDictation) voiceDictation.destroy();
+    });
+
+    return {
+      showToast,
+      setProcessingDisabled(disabled) {
+        sendButton.disabled = disabled;
+        messageInput.disabled = disabled;
+        if (micButton) {
+          micButton.disabled =
+            disabled || !global.VoiceDictation || !VoiceDictation.isSupported();
+        }
+      },
+      destroy() {
+        if (voiceDictation) voiceDictation.destroy();
+      },
+    };
+  }
+
+  global.ChatVoiceInput = { init };
+})(typeof window !== "undefined" ? window : globalThis);
+
+    </script>
+    <script>
+      (function () {
+        const PROPS = {"disabled": false, "clearInput": false};
+        const messageInput = document.getElementById("message-input");
+        const sendButton = document.getElementById("send-button");
+        const micButton = document.getElementById("mic-button");
+        const voiceHint = document.getElementById("voice-hint");
+        const toastRegion = document.getElementById("toast-region");
+
+        function setFrameHeight() {
+          Streamlit.setFrameHeight(document.body.scrollHeight + 8);
+        }
+
+        Streamlit.setComponentReady();
+        setFrameHeight();
+
+        const controller = ChatVoiceInput.init({
+          messageInput,
+          sendButton,
+          micButton,
+          voiceHint,
+          toastRegion,
+          getIsProcessing: () => Boolean(PROPS.disabled),
+          onSubmit: (text) => {
+            if (PROPS.disabled) return;
+            messageInput.value = "";
+            Streamlit.setComponentValue({ action: "send", text: text });
+          },
+          onResize: setFrameHeight,
+        });
+
+        controller.setProcessingDisabled(Boolean(PROPS.disabled));
+
+        if (PROPS.clearInput) {
+          messageInput.value = "";
+        }
+      })();
+    </script>
+  </body>
+</html>

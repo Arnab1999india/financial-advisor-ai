@@ -32,14 +32,33 @@ def test_analyze_swing_trading(sample_csv_file):
     assert "buy_signals" in data
     assert "sell_signals" in data
 
+
+def test_analyze_passes_configuration_metadata(sample_csv_file):
+    response = client.post(
+        "/analyze",
+        files={"file": sample_csv_file},
+        data={
+            "strategy": "swing_trading",
+            "data_type": "swing",
+            "symbol": "tcs",
+            "exchange": "NSE",
+            "data_interval": "1 day (Daily)",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["symbol"] == "TCS"
+    assert data["exchange"] == "NSE"
+    assert data["data_interval"] == "1 day (Daily)"
+
 def test_analyze_unsupported_file_type():
     response = client.post(
         "/analyze",
-        files={"file": ("test.txt", b"some content", "text/plain")},
+        files={"file": ("test.doc", b"some content", "application/msword")},
         data={"strategy": "swing_trading", "data_type": "swing"}
     )
     assert response.status_code == 400
-    assert "Unsupported file format" in response.json()["detail"]
+    assert "not allowed" in response.json()["detail"]
 
 def test_analyze_invalid_strategy():
     csv_content = "Date,Open,High,Low,Close,Volume\n" \

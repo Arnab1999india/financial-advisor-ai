@@ -3,7 +3,9 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from tools.market_data import _symbol_from_query, is_market_data_query
+from datetime import datetime, timedelta, timezone
+
+from tools.market_data import _is_stale, _symbol_from_query, is_market_data_query
 
 
 def test_recognises_equity_price_query():
@@ -23,3 +25,10 @@ def test_recognises_metals_and_crypto():
 
 def test_does_not_treat_general_finance_as_a_quote():
     assert is_market_data_query("Explain the price to earnings ratio") is False
+
+
+def test_stale_detection():
+    old = datetime.now(timezone.utc) - timedelta(minutes=30)
+    fresh = datetime.now(timezone.utc) - timedelta(minutes=5)
+    assert _is_stale(old, 15) is True
+    assert _is_stale(fresh, 15) is False

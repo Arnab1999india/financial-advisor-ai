@@ -34,6 +34,10 @@ class AgentState(TypedDict):
         ``RemoveMessage`` (used by ``summarize_history_node``).
     query:
         The raw user query string (set at entry, never mutated).
+    finance_query:
+        Finance-focused text used for retrieval and generation.  For mixed
+        messages, ``gatekeeper_node`` may narrow this to the finance segment
+        while ``query`` keeps the original user text.
     user_id:
         Optional caller identity.  When present, enables the Cognitive Memory
         System: ``memory_retrieve_node`` fetches past episodes for this user,
@@ -44,8 +48,9 @@ class AgentState(TypedDict):
         ``"chitchat"``, or ``"trade_sim"``.
         Set by the router node (or pre-set by gatekeeper's chitchat shortcut).
     domain_status:
-        Set by ``gatekeeper_node``: ``"authorized"`` if the query is
-        finance-related, ``"unauthorized"`` otherwise.
+        Set first by ``finance_classifier_node`` (Gemini finance vs non-finance),
+        then may be confirmed by ``gatekeeper_node``. ``"authorized"`` or
+        ``"unauthorized"``.
     summary:
         Rolling plain-text summary of older conversation turns.  Written by
         ``summarize_history_node`` when the message list exceeds the configured
@@ -101,10 +106,30 @@ class AgentState(TypedDict):
         Proposed paper-trade / alert parameters shown on the approval card.
     approval_decision:
         Resume payload after the user approves, edits, or rejects.
+    grounding_status:
+        ``"full"``, ``"partial"``, or ``"none"`` — set by ``grounding_gate_node``
+        before generation to control abstention and partial-answer prompts.
+    injection_blocked:
+        True when ``injection_guard_node`` rejected the user query.
+    injection_reason:
+        Reason code for blocked injection attempts (logging / telemetry).
+    ambiguity_blocked:
+        True when Step 1 requires the user to clarify an ambiguous term.
+    structured_raw:
+        Raw JSON string returned by the LLM before output validation.
+    structured_citations:
+        Validated citation objects extracted from structured output.
+    output_validate_retried:
+        True when a repair pass was attempted for output validation.
+    market_data_status:
+        ``"ok"`` or ``"failed"`` for live quote lookups.
+    market_unavailable_note:
+        User-safe reason when market data could not be fetched.
     """
 
     messages: Annotated[List[BaseMessage], add_messages]
     query: str
+    finance_query: Optional[str]
     user_id: Optional[str]
     intent: Optional[str]
     domain_status: Optional[str]
@@ -129,3 +154,12 @@ class AgentState(TypedDict):
     approval_reason: Optional[str]
     pending_action: Optional[dict]
     approval_decision: Optional[dict]
+    grounding_status: Optional[str]
+    injection_blocked: Optional[bool]
+    injection_reason: Optional[str]
+    ambiguity_blocked: Optional[bool]
+    structured_raw: Optional[str]
+    structured_citations: Optional[List[dict]]
+    output_validate_retried: Optional[bool]
+    market_data_status: Optional[str]
+    market_unavailable_note: Optional[str]

@@ -5,50 +5,127 @@ const API_BASE_URL = "http://localhost:8000";
 const chatMessages = document.getElementById("chat-messages");
 const messageInput = document.getElementById("message-input");
 const sendButton = document.getElementById("send-button");
+// const micButton = document.getElementById("mic-button");
 const loading = document.getElementById("loading");
 
 // State
 let isProcessing = false;
 
-// Initialize the application
-document.addEventListener("DOMContentLoaded", () => {
-  console.log("Financial Bot Frontend loaded");
-  setupEventListeners();
-  messageInput.focus();
-});
+function setupChatInput() {
+  if (!sendButton || !messageInput) return;
 
-// Event Listeners
-function setupEventListeners() {
-  sendButton.addEventListener("click", sendMessage);
-  messageInput.addEventListener("keypress", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+  sendButton.addEventListener("click", (e) => {
+    e.preventDefault();
+    sendMessage();
+  });
+
+  messageInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       sendMessage();
     }
   });
 }
 
-// Message Handling
-async function sendMessage() {
-  const message = messageInput.value.trim();
+// Initialize the application
+document.addEventListener("DOMContentLoaded", () => {
+  console.log("Financial Bot Frontend loaded");
+  setupChatInput();
+  messageInput.focus();
+});
 
-  if (!message || isProcessing) {
+/*
+ * Voice / mic (ChatVoiceInput) — paused; re-enable when Streamlit + static mic UX is fixed.
+ *
+ * document.addEventListener("DOMContentLoaded", () => {
+ *   ChatVoiceInput.init({
+ *     messageInput,
+ *     sendButton,
+ *     micButton,
+ *     voiceHint,
+ *     toastRegion,
+ *     getIsProcessing: () => isProcessing,
+ *     onSubmit: () => sendMessage(),
+ *   });
+ * });
+ */
+
+function clearPreviousTurn() {
+  const previousUser = document.getElementById("active-user-message");
+  const previousBot = document.getElementById("active-bot-response");
+  if (previousUser) previousUser.remove();
+  if (previousBot) previousBot.remove();
+}
+
+async function consumeChatStream(response, botContentDiv) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let answer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary !== -1) {
+      const block = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      boundary = buffer.indexOf("\n\n");
+
+      for (const line of block.split("\n")) {
+        if (!line.startsWith("data: ")) continue;
+        let payload;
+        try {
+          payload = JSON.parse(line.slice(6));
+        } catch {
+          continue;
+        }
+        if (payload.type === "status" && loading) {
+          loading.textContent = payload.message || "Working…";
+        } else if (payload.type === "token") {
+          answer += payload.text || "";
+          botContentDiv.textContent = answer;
+          chatMessages.scrollTop = chatMessages.scrollHeight;
+        } else if (payload.type === "done") {
+          answer = payload.response?.answer || answer;
+          botContentDiv.textContent = answer;
+        } else if (payload.type === "error") {
+          throw new Error(payload.message || "Stream error");
+        }
+      }
+    }
+  }
+  return answer;
+}
+
+async function sendMessage() {
+  if (isProcessing) {
     return;
   }
 
-  // Add user message to chat
-  addMessage(message, "user");
+  const message = messageInput.value.trim();
+  if (!message) {
+    return;
+  }
 
-  // Clear input and disable controls
-  messageInput.value = "";
+  isProcessing = true;
   setProcessingState(true);
+  clearPreviousTurn();
+
+  const userMessageDiv = addMessage(message, "user");
+  userMessageDiv.id = "active-user-message";
+  const botMessageDiv = addMessage("", "bot");
+  botMessageDiv.id = "active-bot-response";
+  const botContentDiv = botMessageDiv.querySelector(".message-content");
 
   try {
-    // Send request to backend
-    const response = await fetch(`${API_BASE_URL}/chat`, {
+    const response = await fetch(`${API_BASE_URL}/chat/stream`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Accept: "text/event-stream",
       },
       body: JSON.stringify({ query: message }),
     });
@@ -57,22 +134,16 @@ async function sendMessage() {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    const data = await response.json();
-
-    // Add bot response to chat
-    addMessage(data.answer, "bot");
+    await consumeChatStream(response, botContentDiv);
   } catch (error) {
     console.error("Error:", error);
-    addMessage(
-      "Sorry, I encountered an error while processing your question. Please try again.",
-      "bot"
-    );
+    botContentDiv.textContent =
+      "Sorry, I encountered an error while processing your question. Please try again.";
   } finally {
     setProcessingState(false);
   }
 }
 
-// UI Functions
 function addMessage(text, sender) {
   const messageDiv = document.createElement("div");
   messageDiv.className = `message ${sender}-message`;
@@ -84,8 +155,8 @@ function addMessage(text, sender) {
   messageDiv.appendChild(contentDiv);
   chatMessages.appendChild(messageDiv);
 
-  // Scroll to bottom
   chatMessages.scrollTop = chatMessages.scrollHeight;
+  return messageDiv;
 }
 
 function setProcessingState(processing) {
@@ -93,70 +164,21 @@ function setProcessingState(processing) {
 
   if (processing) {
     loading.classList.remove("hidden");
-    sendButton.disabled = true;
-    messageInput.disabled = true;
+    loading.textContent = "Working…";
   } else {
     loading.classList.add("hidden");
-    sendButton.disabled = false;
-    messageInput.disabled = false;
     messageInput.focus();
   }
 }
 
-// Utility Functions
 function formatMessage(text) {
-  // Basic formatting for better display
   return text.trim();
 }
 
 function sanitizeInput(text) {
-  // Basic sanitization
   return text.replace(/[<>]/g, "");
 }
 
-// Error Handling
 function handleApiError(error) {
   console.error("API Error:", error);
-
-  let errorMessage = "An error occurred. ";
-
-  if (error.message.includes("Failed to fetch")) {
-    errorMessage += "Please check your internet connection.";
-  } else if (error.message.includes("503")) {
-    errorMessage += "The service is temporarily unavailable.";
-  } else {
-    errorMessage += "Please try again later.";
-  }
-
-  addMessage(errorMessage, "bot");
 }
-
-// Keyboard Shortcuts
-document.addEventListener("keydown", (e) => {
-  // Ctrl/Cmd + Enter to send message
-  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-    sendMessage();
-  }
-
-  // Escape to clear input
-  if (e.key === "Escape") {
-    messageInput.value = "";
-    messageInput.focus();
-  }
-});
-
-// Auto-resize input
-messageInput.addEventListener("input", () => {
-  messageInput.style.height = "auto";
-  messageInput.style.height = Math.min(messageInput.scrollHeight, 100) + "px";
-});
-
-// Prevent form submission on Enter
-messageInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-  }
-});
-
-// Initialize
-console.log("Financial Bot Frontend initialized successfully");

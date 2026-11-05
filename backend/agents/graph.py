@@ -3,14 +3,16 @@ LangGraph StateGraph — Financial Bot Agent
 ==========================================
 Defines the directed graph that orchestrates query handling:
 
-    START → summarize_history → memory_retrieve → gatekeeper
+    START → injection_guard → finance_classifier (Gemini finance vs non-finance)
          unauthorized → out_of_scope → END
-         authorized → router
+         authorized → ambiguity_check → gatekeeper
+         unauthorized → out_of_scope → END
+         authorized → summarize_history → memory_retrieve → router
               chitchat → chitchat → END
               financial_qa → rag_retrieve → grade_documents
-                   relevant → gemini_generate
+                   relevant → grounding_gate → gemini_generate | insufficient_evidence
                    not_relevant + rewrites left → query_rewrite → rag_retrieve
-                   not_relevant + budget spent → web_search → gemini_generate
+                   not_relevant + budget spent → web_search → grounding_gate
               gemini_generate → outbound_guardrail → citation_map → setup_gate
                    approval required → human_approval → execute_simulation → memory_save → END
                    otherwise → memory_save → END
@@ -28,12 +30,18 @@ from agents.human_approval import (
     human_approval_node,
     setup_gate_node,
 )
+from agents.ambiguity_check import ambiguity_check_node, dispatch_ambiguity
+from agents.finance_classifier import dispatch_finance_classifier, finance_classifier_node
+from agents.injection_guard import dispatch_injection, injection_guard_node
+from agents.output_safety import output_safety_node
+from agents.output_validate import output_validate_node
 from agents.nodes import (
     chitchat_node,
     gatekeeper_node,
     gemini_generate_node,
     memory_retrieve_node,
     memory_save_node,
+    dispatch_market_data,
     market_data_node,
     out_of_scope_node,
     rag_retrieve_node,
@@ -42,6 +50,11 @@ from agents.nodes import (
 )
 from agents.citation_map import citation_map_node
 from agents.outbound_guardrail import outbound_guardrail_node
+from agents.grounding_gate import (
+    dispatch_grounding,
+    grounding_gate_node,
+    insufficient_evidence_node,
+)
 from agents.retrieval_loop import (
     dispatch_retrieval_grade,
     grade_documents_node,
@@ -69,6 +82,9 @@ def build_agent_graph():
     graph.add_node("summarize_history", summarize_history_node)
     graph.add_node("memory_retrieve", memory_retrieve_node)
     graph.add_node("gatekeeper", gatekeeper_node)
+    graph.add_node("injection_guard", injection_guard_node)
+    graph.add_node("finance_classifier", finance_classifier_node)
+    graph.add_node("ambiguity_check", ambiguity_check_node)
     graph.add_node("out_of_scope", out_of_scope_node)
     graph.add_node("router", router_node)
     graph.add_node("market_data", market_data_node)
@@ -76,8 +92,12 @@ def build_agent_graph():
     graph.add_node("grade_documents", grade_documents_node)
     graph.add_node("query_rewrite", query_rewrite_node)
     graph.add_node("web_search", web_search_node)
+    graph.add_node("grounding_gate", grounding_gate_node)
+    graph.add_node("insufficient_evidence", insufficient_evidence_node)
     graph.add_node("gemini_generate", gemini_generate_node)
+    graph.add_node("output_validate", output_validate_node)
     graph.add_node("outbound_guardrail", outbound_guardrail_node)
+    graph.add_node("output_safety", output_safety_node)
     graph.add_node("citation_map", citation_map_node)
     graph.add_node("setup_gate", setup_gate_node)
     graph.add_node("human_approval", human_approval_node)
@@ -85,19 +105,43 @@ def build_agent_graph():
     graph.add_node("memory_save", memory_save_node)
     graph.add_node("chitchat", chitchat_node)
 
-    graph.add_edge(START, "summarize_history")
-    graph.add_edge("summarize_history", "memory_retrieve")
-    graph.add_edge("memory_retrieve", "gatekeeper")
+    graph.add_edge(START, "injection_guard")
+    graph.add_conditional_edges(
+        "injection_guard",
+        dispatch_injection,
+        {
+            "continue": "finance_classifier",
+            "blocked": END,
+        },
+    )
+    graph.add_conditional_edges(
+        "finance_classifier",
+        dispatch_finance_classifier,
+        {
+            "authorized": "ambiguity_check",
+            "unauthorized": "out_of_scope",
+        },
+    )
+    graph.add_conditional_edges(
+        "ambiguity_check",
+        dispatch_ambiguity,
+        {
+            "continue": "gatekeeper",
+            "clarify": END,
+        },
+    )
 
     graph.add_conditional_edges(
         "gatekeeper",
         _dispatch_domain,
         {
-            "authorized": "router",
+            "authorized": "summarize_history",
             "unauthorized": "out_of_scope",
         },
     )
     graph.add_edge("out_of_scope", END)
+    graph.add_edge("summarize_history", "memory_retrieve")
+    graph.add_edge("memory_retrieve", "router")
 
     graph.add_conditional_edges(
         "router",
@@ -109,22 +153,41 @@ def build_agent_graph():
             "trade_sim": "human_approval",
         },
     )
-    graph.add_edge("market_data", "citation_map")
+    graph.add_conditional_edges(
+        "market_data",
+        dispatch_market_data,
+        {
+            "complete": "output_safety",
+            "document_fallback": "rag_retrieve",
+        },
+    )
 
     graph.add_edge("rag_retrieve", "grade_documents")
     graph.add_conditional_edges(
         "grade_documents",
         dispatch_retrieval_grade,
         {
-            "generate": "gemini_generate",
+            "generate": "grounding_gate",
             "rewrite": "query_rewrite",
             "web_search": "web_search",
+            "kb_missing": "insufficient_evidence",
         },
     )
     graph.add_edge("query_rewrite", "rag_retrieve")
-    graph.add_edge("web_search", "gemini_generate")
-    graph.add_edge("gemini_generate", "outbound_guardrail")
-    graph.add_edge("outbound_guardrail", "citation_map")
+    graph.add_edge("web_search", "grounding_gate")
+    graph.add_conditional_edges(
+        "grounding_gate",
+        dispatch_grounding,
+        {
+            "generate": "gemini_generate",
+            "insufficient_evidence": "insufficient_evidence",
+        },
+    )
+    graph.add_edge("insufficient_evidence", "citation_map")
+    graph.add_edge("gemini_generate", "output_validate")
+    graph.add_edge("output_validate", "outbound_guardrail")
+    graph.add_edge("outbound_guardrail", "output_safety")
+    graph.add_edge("output_safety", "citation_map")
     graph.add_edge("citation_map", "setup_gate")
     graph.add_conditional_edges(
         "setup_gate",

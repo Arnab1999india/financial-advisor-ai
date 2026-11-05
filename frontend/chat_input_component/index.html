@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 0 2px 4px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: #333;
+        background: transparent;
+      }
+      .field-label {
+        font-size: 14px;
+        font-weight: 600;
+        margin: 0 0 6px 2px;
+      }
+      .hint {
+        margin: 6px 2px 0;
+        font-size: 12px;
+        color: #666;
+      }
+      .input-row { display: flex; align-items: flex-end; gap: 10px; width: 100%; }
+      #message-input {
+        flex: 1;
+        padding: 12px 16px;
+        border: 1px solid #ddd;
+        border-radius: 18px;
+        font-size: 14px;
+        font-family: inherit;
+        outline: none;
+        resize: vertical;
+        min-height: 44px;
+        max-height: 160px;
+        line-height: 1.4;
+      }
+      #message-input:focus { border-color: #1976d2; }
+      #send-button {
+        flex-shrink: 0;
+        padding: 12px 24px;
+        background: #1976d2;
+        color: white;
+        border: none;
+        border-radius: 25px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+      }
+      #send-button:hover:not(:disabled) { background: #1565c0; }
+      #send-button:disabled { background: #ccc; cursor: not-allowed; }
+    </style>
+    <script>
+      (function () {
+        "use strict";
+        function send(type, data) {
+          window.parent.postMessage(
+            Object.assign({ isStreamlitMessage: true, type: type }, data),
+            "*"
+          );
+        }
+        window.Streamlit = {
+          RENDER_EVENT: "streamlit:render",
+          events: {
+            addEventListener: function (eventName, callback) {
+              window.addEventListener("message", function (event) {
+                const data = event.data;
+                if (!data || data.type !== eventName) return;
+                callback({
+                  detail: {
+                    args: data.args || {},
+                    disabled: data.disabled,
+                    theme: data.theme,
+                  },
+                });
+              });
+            },
+          },
+          setComponentReady: function () {
+            send("streamlit:componentReady", { apiVersion: 1 });
+          },
+          setComponentValue: function (value) {
+            send("streamlit:setComponentValue", { value: value, dataType: "json" });
+          },
+          setFrameHeight: function (height) {
+            send("streamlit:setFrameHeight", { height: height });
+          },
+        };
+      })();
+    </script>
+  </head>
+  <body>
+    <p class="field-label">Your question</p>
+    <div class="input-row">
+      <textarea
+        id="message-input"
+        placeholder="e.g., What is P/E ratio?"
+        maxlength="500"
+        rows="2"
+        aria-label="Your question"
+      ></textarea>
+      <button id="send-button" type="button"><span>Send</span></button>
+    </div>
+    <p class="hint">Enter to send · Shift+Enter for a new line</p>
+
+    <script>
+      (function () {
+        const messageInput = document.getElementById("message-input");
+        const sendButton = document.getElementById("send-button");
+
+        let busy = false;
+        let pendingToBackend = false;
+
+        function setFrameHeight() {
+          Streamlit.setFrameHeight(document.body.scrollHeight + 8);
+        }
+
+        function normalizeProps(raw) {
+          if (!raw) return {};
+          return {
+            busy: Boolean(raw.busy),
+          };
+        }
+
+        function applyProps(next) {
+          const normalized = normalizeProps(next);
+          if (Object.prototype.hasOwnProperty.call(normalized, "busy")) {
+            busy = normalized.busy;
+          }
+          pendingToBackend = false;
+          setFrameHeight();
+        }
+
+        function submitMessage() {
+          if (busy || pendingToBackend) return;
+
+          const text = messageInput.value.trim();
+          if (!text) return;
+
+          pendingToBackend = true;
+
+          Streamlit.setComponentValue({ action: "send", text: text });
+        }
+
+        sendButton.addEventListener("click", (e) => {
+          e.preventDefault();
+          submitMessage();
+        });
+
+        messageInput.addEventListener("keydown", (e) => {
+          if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+          e.preventDefault();
+          submitMessage();
+        });
+
+        messageInput.addEventListener("input", setFrameHeight);
+
+        Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, (event) => {
+          applyProps(event.detail.args);
+        });
+        Streamlit.setComponentReady();
+        setFrameHeight();
+      })();
+    </script>
+  </body>
+</html>

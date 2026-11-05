@@ -19,13 +19,17 @@ import json
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
 from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 
 from agents.graph import financial_agent
-from analysis import load_data_from_file, run_analysis
+from analysis import load_data_from_bytes, run_analysis
+from security.pii import mask_pii
+from validation.uploads import UploadValidationError, validate_upload
 from config import settings
 from logger import logger
 from memory.cognitive_store import memory_store
@@ -41,15 +45,18 @@ from models import (
     TelemetrySnapshot,
     TokenUsageSummary,
 )
+from cache.response_cache import get_exact, get_semantic, put_exact, put_semantic
+from chat_pipeline import (
+    chat_preflight,
+    stream_cached_response,
+    stream_graph_response,
+    try_cache_hit,
+)
+from logging_structured import StageTimer
 from rag.retriever import retriever as financial_retriever
+from rate_limit.limiter import rate_limiter
+from telemetry.cost_tracker import cost_tracker
 from telemetry import tracker as token_tracker
-
-# ---------------------------------------------------------------------------
-# Response cache — only for fully anonymous stateless requests.
-# Requests with user_id are always personalised and must bypass the cache so
-# that two different users asking the same question get different answers.
-# ---------------------------------------------------------------------------
-_response_cache: dict[str, QueryResponse] = {}
 
 # ---------------------------------------------------------------------------
 # Application
@@ -74,6 +81,45 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Return safe 400 responses without leaking validation internals."""
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    return JSONResponse(
+        status_code=400,
+        content={"detail": "Invalid request.", "request_id": request_id},
+        headers={"X-Request-ID": request_id},
+    )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Consistent JSON errors without stack traces or secrets."""
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    logger.error("Unhandled error request_id=%s type=%s", request_id, type(exc).__name__)
+    if isinstance(exc, HTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail, "request_id": request_id},
+            headers=getattr(exc, "headers", None) or {"X-Request-ID": request_id},
+        )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error.", "request_id": request_id},
+        headers={"X-Request-ID": request_id},
+    )
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
 # ---------------------------------------------------------------------------
 # Startup
 # ---------------------------------------------------------------------------
@@ -89,8 +135,12 @@ async def startup_event() -> None:
     with open(data_path, "r", encoding="utf-8") as fh:
         qa_data = json.load(fh)
 
-    financial_retriever.initialize(qa_data)
-    logger.info("RAG retriever ready with %d Q&A pairs.", len(qa_data))
+    try:
+        financial_retriever.initialize(qa_data)
+        logger.info("RAG retriever ready with %d Q&A pairs.", len(qa_data))
+    except Exception as exc:
+        financial_retriever.init_error = "Knowledge base failed to load."
+        logger.error("FAISS initialisation failed: %s", type(exc).__name__)
     logger.info("LLM: %s | Embedding: %s", settings.gemini_model, settings.embedding_model)
     logger.info("=== Startup complete ===")
 
@@ -108,6 +158,8 @@ async def root() -> HealthResponse:
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
 async def health_check() -> HealthResponse:
     """Detailed health status — reports 'initializing' if the RAG index is not yet ready."""
+    if financial_retriever.init_error:
+        return HealthResponse(status="degraded")
     status = "healthy" if financial_retriever.is_ready else "initializing"
     return HealthResponse(status=status)
 
@@ -199,31 +251,88 @@ def _query_response_from_state(
 
 
 @app.post("/chat", response_model=QueryResponse, tags=["Chat"])
-async def chat(request: QueryRequest) -> QueryResponse:
+async def chat(body: QueryRequest, request: Request) -> QueryResponse:
     """Process a financial question through the LangGraph agent.
 
     High-probability setups and trade/alert simulations pause until
     ``POST /chat/resume`` receives an explicit approval or rejection.
     """
-    logger.info("Incoming query: %s | user_id: %s", request.query, request.user_id or "anonymous")
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    client_ip = request.client.host if request.client else "unknown"
 
+    logger.info(
+        "Incoming query (masked): %s | user_id: %s | request_id: %s",
+        mask_pii(body.query),
+        body.user_id or "anonymous",
+        request_id,
+    )
+
+    rl_decision = rate_limiter.check_chat(ip=client_ip, user_id=body.user_id)
+    if not rl_decision.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests. Please wait and try again.",
+            headers={
+                "Retry-After": str(max(rl_decision.retry_after_seconds, 1)),
+                "X-Request-ID": request_id,
+            },
+        )
+
+    inflight = rate_limiter.acquire_inflight(body.user_id)
+    if not inflight.allowed:
+        rate_limiter.release_inflight(body.user_id)
+        raise HTTPException(
+            status_code=429,
+            detail="Too many concurrent requests. Please retry shortly.",
+            headers={
+                "Retry-After": str(max(inflight.retry_after_seconds, 1)),
+                "X-Request-ID": request_id,
+            },
+        )
+
+    if financial_retriever.init_error:
+        rate_limiter.release_inflight(body.user_id)
+        raise HTTPException(
+            status_code=503,
+            detail="Knowledge base is unavailable. Please retry later.",
+            headers={"X-Request-ID": request_id},
+        )
     if not financial_retriever.is_ready:
-        raise HTTPException(status_code=503, detail="Service initializing. Please retry shortly.")
+        rate_limiter.release_inflight(body.user_id)
+        raise HTTPException(
+            status_code=503,
+            detail="Service initializing. Please retry shortly.",
+            headers={"X-Request-ID": request_id},
+        )
 
-    is_cacheable = not request.session_id and not request.user_id
-    cache_key = request.query.strip().lower()
-    if is_cacheable and cache_key in _response_cache:
-        logger.info("Response cache hit — skipping pipeline.")
-        token_tracker.record_request([], cache_hit=True)
-        return _response_cache[cache_key]
+    is_cacheable = not body.session_id and not body.user_id
+    cache_key = f"{financial_retriever.index_epoch}:{body.query.strip().lower()}"
+    timer = StageTimer(request_id=request_id, stage="chat", user_id=body.user_id)
+    if is_cacheable:
+        cached = get_exact(cache_key)
+        if cached is not None:
+            timer.finish(cache_hit=True, extra={"cache_type": "exact"})
+            token_tracker.record_request([], cache_hit=True)
+            return cached
+        if financial_retriever.is_ready:
+            try:
+                query_vec = financial_retriever.embed_query_cached(body.query)
+                semantic_hit = get_semantic(query_vec)
+                if semantic_hit is not None:
+                    timer.finish(cache_hit=True, extra={"cache_type": "semantic"})
+                    token_tracker.record_request([], cache_hit=True)
+                    return semantic_hit
+            except Exception:
+                pass
 
-    thread_id = request.session_id or str(uuid.uuid4())
+    thread_id = body.session_id or str(uuid.uuid4())
 
     try:
         initial_state = {
-            "messages": [HumanMessage(content=request.query)],
-            "query": request.query,
-            "user_id": request.user_id,
+            "messages": [HumanMessage(content=mask_pii(body.query))],
+            "query": mask_pii(body.query),
+            "finance_query": None,
+            "user_id": body.user_id,
             "intent": None,
             "long_term_context": None,
             "retrieved_docs": None,
@@ -235,7 +344,13 @@ async def chat(request: QueryRequest) -> QueryResponse:
             "model_used": None,
             "token_calls": [],
             "guardrail_amended": False,
-            "retrieval_query": request.query,
+            "retrieval_query": mask_pii(body.query),
+            "injection_blocked": False,
+            "injection_reason": None,
+            "ambiguity_blocked": False,
+            "structured_raw": None,
+            "structured_citations": None,
+            "output_validate_retried": False,
             "rewrite_attempts": 0,
             "retrieval_grade": None,
             "retrieval_source": None,
@@ -245,6 +360,9 @@ async def chat(request: QueryRequest) -> QueryResponse:
             "approval_reason": None,
             "pending_action": None,
             "approval_decision": None,
+            "grounding_status": None,
+            "market_data_status": None,
+            "market_unavailable_note": None,
         }
 
         result = await financial_agent.ainvoke(
@@ -261,6 +379,26 @@ async def chat(request: QueryRequest) -> QueryResponse:
         token_usage = TokenUsageSummary.model_validate(
             token_tracker.record_request(values.get("token_calls") or [])
         )
+        cost_tracker.record(body.user_id, token_usage.estimated_cost_usd)
+        timer.finish(
+            cache_hit=False,
+            tokens_in=token_usage.input_tokens,
+            tokens_out=token_usage.output_tokens,
+            guardrail=values.get("injection_reason") or values.get("guardrail_amended"),
+            extra={"model_used": values.get("model_used"), "intent": values.get("intent")},
+        )
+        token_decision = rate_limiter.check_daily_tokens(body.user_id, token_usage.total_tokens)
+        if not token_decision.allowed:
+            rate_limiter.release_inflight(body.user_id)
+            raise HTTPException(
+                status_code=429,
+                detail="Daily token budget exceeded for this user.",
+                headers={
+                    "Retry-After": str(max(token_decision.retry_after_seconds, 1)),
+                    "X-Request-ID": request_id,
+                },
+            )
+
         response = _query_response_from_state(
             values,
             thread_id=thread_id,
@@ -269,20 +407,76 @@ async def chat(request: QueryRequest) -> QueryResponse:
         )
 
         if is_cacheable and response.status == "complete":
-            if len(_response_cache) >= settings.response_cache_size:
-                _response_cache.pop(next(iter(_response_cache)))
-            _response_cache[cache_key] = response
+            ttl = (
+                settings.document_answer_cache_ttl_seconds
+                if (values.get("retrieval_source") or "").startswith("faiss")
+                else settings.exact_cache_ttl_seconds
+            )
+            put_exact(cache_key, response, ttl)
+            if financial_retriever.is_ready:
+                try:
+                    query_vec = financial_retriever.embed_query_cached(body.query)
+                    put_semantic(
+                        query_vec,
+                        body.query,
+                        response,
+                        settings.semantic_cache_ttl_seconds,
+                    )
+                except Exception:
+                    pass
 
+        rate_limiter.release_inflight(body.user_id)
         return response
 
     except Exception as exc:
-        logger.error("Chat endpoint error: %s", exc)
-        raise HTTPException(status_code=500, detail="Internal server error")
+        rate_limiter.release_inflight(body.user_id)
+        logger.error("Chat endpoint error: %s request_id=%s", type(exc).__name__, request_id)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error.",
+            headers={"X-Request-ID": request_id},
+        ) from None
+
+
+@app.post("/chat/stream", tags=["Chat"])
+async def chat_stream(body: QueryRequest, request: Request) -> StreamingResponse:
+    """Stream progress and answer tokens via Server-Sent Events (SSE).
+
+    Events: ``status`` (progress), ``token`` (answer text chunks), ``done`` (full QueryResponse JSON), ``error``.
+    """
+    request_id, _, is_cacheable, cache_key, timer = chat_preflight(body, request)
+    thread_id = body.session_id or str(uuid.uuid4())
+    headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Request-ID": request_id,
+    }
+
+    cached = try_cache_hit(body, is_cacheable=is_cacheable, cache_key=cache_key, timer=timer)
+    if cached is not None:
+        return StreamingResponse(stream_cached_response(cached), media_type="text/event-stream", headers=headers)
+
+    return StreamingResponse(
+        stream_graph_response(
+            body,
+            thread_id=thread_id,
+            is_cacheable=is_cacheable,
+            cache_key=cache_key,
+            timer=timer,
+            thread_config_fn=_thread_config,
+            query_response_from_state_fn=_query_response_from_state,
+            interrupt_payload_fn=_interrupt_payload,
+        ),
+        media_type="text/event-stream",
+        headers=headers,
+    )
 
 
 @app.post("/chat/resume", response_model=QueryResponse, tags=["Chat"])
 async def chat_resume(request: ApprovalResumeRequest) -> QueryResponse:
     """Resume a paused graph after the user approves, edits, or rejects the card."""
+    if financial_retriever.init_error:
+        raise HTTPException(status_code=503, detail="Knowledge base is unavailable. Please retry later.")
     if not financial_retriever.is_ready:
         raise HTTPException(status_code=503, detail="Service initializing. Please retry shortly.")
 
@@ -330,18 +524,53 @@ async def chat_resume(request: ApprovalResumeRequest) -> QueryResponse:
 
 @app.post("/analyze", response_model=AnalysisResponse, tags=["Analysis"])
 async def analyze(
+    request: Request,
     file: UploadFile = File(..., description="CSV, XLS, XLSX, or PDF with OHLC data"),
     strategy: str = Form(..., description="Trading strategy key"),
     data_type: str = Form(..., description="Data type hint (e.g. 'swing', 'intraday')"),
+    symbol: str | None = Form(None, description="Instrument symbol (metadata for the run)"),
+    exchange: str | None = Form(None, description="Exchange id, e.g. NSE or BSE"),
+    data_interval: str | None = Form(None, description="Expected candle interval label"),
 ) -> AnalysisResponse:
     """Upload historical OHLC data and receive buy/sell signals."""
-    logger.info("Analysis request — strategy=%s  data_type=%s", strategy, data_type)
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    client_ip = request.client.host if request.client else "unknown"
+    upload_decision = rate_limiter.check_upload(client_ip)
+    if not upload_decision.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many upload requests. Please wait and try again.",
+            headers={"Retry-After": str(max(upload_decision.retry_after_seconds, 1)), "X-Request-ID": request_id},
+        )
+
+    logger.info(
+        "Analysis request — strategy=%s data_type=%s symbol=%s exchange=%s interval=%s request_id=%s",
+        strategy,
+        data_type,
+        symbol,
+        exchange,
+        data_interval,
+        request_id,
+    )
 
     try:
-        df = load_data_from_file(file)
+        ext, raw = validate_upload(
+            file,
+            max_bytes=settings.upload_max_bytes,
+            max_pdf_pages=settings.upload_max_pdf_pages,
+        )
+        df = load_data_from_bytes(ext, raw)
         result = run_analysis(df, strategy, data_type)
+        if symbol and symbol.strip():
+            result["symbol"] = symbol.strip().upper()
+        if exchange and exchange.strip():
+            result["exchange"] = exchange.strip().upper()
+        if data_interval and data_interval.strip():
+            result["data_interval"] = data_interval.strip()
         logger.info("Analysis complete — strategy=%s", strategy)
         return AnalysisResponse(**result)
+    except UploadValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
@@ -375,6 +604,8 @@ async def get_info() -> dict:
             "total_tokens": snap["total_tokens"],
             "estimated_cost_usd": snap["estimated_cost_usd"],
         },
+        "cost_alerts": cost_tracker.snapshot(),
+        "rag_init_error": financial_retriever.init_error,
     }
 
 

@@ -15,32 +15,46 @@ from rag.citations import utc_now_iso
 
 from config import settings
 from logger import logger
+from rag.grounding_policy import url_on_allowlist, web_untrusted_preamble
+from resilience.external import ProviderUnavailableError, call_external
+from security.tool_policy import assert_read_only_tool
 
 
 def search_web(query: str, max_results: int | None = None) -> list[dict[str, str]]:
-    """Return a list of ``{title, url, snippet}`` hits for *query*."""
+    """Return allow-listed ``{title, url, snippet}`` hits for *query*."""
+    assert_read_only_tool("search_web")
     limit = max_results or settings.web_search_max_results
     tavily_key = (settings.tavily_api_key or "").strip()
     if tavily_key:
-        hits = _search_tavily(query, limit, tavily_key)
+        hits = _filter_allowlist(_search_tavily(query, limit, tavily_key))
         if hits:
             return _annotate_hits(hits)
-        logger.warning("Tavily returned no results; falling back to DuckDuckGo.")
-    return _annotate_hits(_search_duckduckgo(query, limit))
+        logger.warning("Tavily returned no allow-listed results; falling back to DuckDuckGo.")
+    return _annotate_hits(_filter_allowlist(_search_duckduckgo(query, limit)))
 
 
 def format_web_context(hits: list[dict[str, str]]) -> str:
     """Format search hits for injection into the generation prompt."""
     if not hits:
         return ""
+    preamble = web_untrusted_preamble()
     blocks = []
     for i, hit in enumerate(hits, start=1):
+        fetched = hit.get("retrieved_at") or hit.get("source_timestamp") or ""
         blocks.append(
+            f"{preamble}\n"
             f"[WEB {i}] {hit.get('title', '').strip()}\n"
-            f"URL: {hit.get('url', '').strip()}\n"
+            f"[Source: {hit.get('url', '').strip()}, fetched {fetched}]\n"
             f"{hit.get('snippet', '').strip()}"
         )
     return "\n\n".join(blocks)
+
+
+def _filter_allowlist(hits: list[dict[str, str]]) -> list[dict[str, str]]:
+    allowed = [h for h in hits if url_on_allowlist(h.get("url") or "")]
+    if hits and not allowed:
+        logger.warning("Web search returned %d hit(s); none on allow-list.", len(hits))
+    return allowed
 
 
 def _annotate_hits(hits: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -65,8 +79,15 @@ def _search_tavily(query: str, limit: int, api_key: str) -> list[dict[str, str]]
     try:
         from tavily import TavilyClient  # type: ignore
 
-        client = TavilyClient(api_key=api_key)
-        payload: dict[str, Any] = client.search(query, max_results=limit)
+        def _run():
+            client = TavilyClient(api_key=api_key)
+            return client.search(query, max_results=limit)
+
+        payload: dict[str, Any] = call_external(
+            "web_search",
+            _run,
+            timeout_seconds=settings.web_search_timeout_seconds,
+        )
         results = payload.get("results") or []
         hits = []
         for item in results[:limit]:
@@ -80,6 +101,9 @@ def _search_tavily(query: str, limit: int, api_key: str) -> list[dict[str, str]]
             )
         logger.info("Tavily web search returned %d hit(s).", len(hits))
         return hits
+    except ProviderUnavailableError:
+        logger.warning("Tavily search unavailable (circuit open or timeout).")
+        return []
     except Exception as exc:
         logger.warning("Tavily search failed: %s", exc)
         return []
@@ -90,15 +114,20 @@ def _search_duckduckgo(query: str, limit: int) -> list[dict[str, str]]:
         from duckduckgo_search import DDGS  # type: ignore
 
         hits: list[dict[str, str]] = []
-        with DDGS() as ddgs:
-            for item in ddgs.text(query, max_results=limit):
-                hits.append(
-                    {
-                        "title": str(item.get("title") or ""),
-                        "url": str(item.get("href") or item.get("url") or ""),
-                        "snippet": str(item.get("body") or item.get("snippet") or ""),
-                    }
-                )
+        def _run():
+            local_hits: list[dict[str, str]] = []
+            with DDGS() as ddgs:
+                for item in ddgs.text(query, max_results=limit):
+                    local_hits.append(
+                        {
+                            "title": str(item.get("title") or ""),
+                            "url": str(item.get("href") or item.get("url") or ""),
+                            "snippet": str(item.get("body") or item.get("snippet") or ""),
+                        }
+                    )
+            return local_hits
+
+        hits = call_external("web_search", _run, timeout_seconds=settings.web_search_timeout_seconds)
         logger.info("DuckDuckGo web search returned %d hit(s).", len(hits))
         return hits
     except Exception as exc:

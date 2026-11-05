@@ -1,0 +1,139 @@
+{
+  "off_topic_message": "I can only help with finance-related questions such as markets, investing, taxes, banking, and financial planning.",
+  "investment_disclaimer": "\n\n---\n*For information only. This is not personalized financial advice. Consider speaking with a licensed professional before making investment decisions.*",
+  "finance_keywords": [
+    "stock", "stocks", "share", "shares", "market", "invest", "investment", "investing",
+    "portfolio", "trading", "trade", "mutual", "fund", "etf", "etfs", "bond", "bonds",
+    "equity", "dividend", "revenue", "earnings", "ipo", "nse", "bse", "nifty", "sensex",
+    "forex", "commodity", "commodities", "inflation", "deflation", "gdp", "recession",
+    "banking", "bank", "loan", "loans", "emi", "mortgage", "credit", "debit", "insurance",
+    "tax", "taxes", "taxation", "gst", "income", "budget", "budgeting", "savings",
+    "sebi", "rbi", "forex", "currency", "crypto", "bitcoin", "ethereum", "blockchain",
+    "balance", "sheet", "cashflow", "cash", "flow", "pe", "p/e", "ratio", "nav", "yield",
+    "liquidity", "derivative", "options", "futures", "sip", "fd", "fixed", "deposit",
+    "interest", "rate", "rates", "refinance", "creditworthiness", "cibil", "underwriting",
+    "rebalancing", "diversification", "asset", "allocation", "financial", "finance",
+    "fiscal", "monetary", "macroeconomic", "microeconomic", "valuation", "margin",
+    "equities", "debt", "securities", "broker", "brokerage", "demat",
+    "intraday", "swing", "scalping", "rsi", "macd", "candlestick", "volatility",
+    "hedge", "hedging", "index", "nasdaq", "dow", "sp500", "planning", "retirement",
+    "pension", "annuity", "premium", "claim", "policy", "underwriter", "audit",
+    "accounting", "ledger", "profit", "loss", "ebitda", "reit", "mf", "amc",
+    "price", "alert", "simulate", "simulation", "paper",
+    "roi", "historical"
+  ],
+  "finance_phrases": [
+    "mutual fund", "exchange traded fund", "interest rate", "income tax", "credit score",
+    "financial planning", "balance sheet", "cash flow", "price to earnings", "stock market",
+    "capital gains", "tax deduction", "home loan", "personal loan", "car loan",
+    "health insurance", "life insurance", "term insurance", "fixed deposit", "recurring deposit",
+    "systematic investment", "systematic withdrawal", "demat account", "trading account",
+    "repo rate", "reverse repo", "monetary policy", "fiscal policy", "current account",
+    "savings account", "net asset value", "expense ratio", "credit card", "debit card",
+    "crypto regulation", "earnings report", "quarterly results", "annual report",
+    "public offering", "rights issue", "bonus issue", "stock split", "buyback",
+    "s&p 500", "return on investment",
+    "moving average", "simple moving average", "exponential moving average",
+    "44 moving average", "44-period moving average", "44 period moving average",
+    "swing trading", "technical analysis", "trading strategy"
+  ],
+  "technical_finance_patterns": [
+    "\\bmoving average\\b", "\\b\\d{1,3}[\\s-]*(?:period|day|week)?\\s*moving average",
+    "\\bsma\\b", "\\bema\\b", "\\bwma\\b", "\\bvwap\\b",
+    "\\bbollinger bands?\\b", "\\bcandlestick\\b", "\\bfibonacci\\b"
+  ],
+  "ambiguous_term_clarifications": {
+    "return": "Could you please clarify? Are you asking about a financial return on investment (ROI), or returning a product to a store?",
+    "portfolio": "Could you please clarify? Are you asking about a financial investment portfolio, or a professional work portfolio?",
+    "liquid": "Could you please clarify? Are you asking about liquid assets in finance, or the physical state of a liquid?",
+    "capital": "Could you please clarify? Are you asking about financial capital (investment/funding), or the capital city of a country?"
+  },
+  "ambiguity_skip_patterns": [
+    "^\\s*(hi|hello|hey|thanks|thank you|bye|goodbye)\\s*[!.?]*\\s*$"
+  ],
+  "ambiguity_finance_lock_patterns": [
+    "\\broi\\b", "\\breturn on investment\\b", "\\byield\\b", "\\bdividend\\b",
+    "\\bstock\\b", "\\bshares?\\b", "\\bmutual fund\\b", "\\betf\\b", "\\bbond\\b",
+    "\\binvest(?:ment|ing)?\\b", "\\bportfolio\\b", "\\basset allocation\\b",
+    "\\bs&p\\s*500\\b", "\\bsp500\\b", "\\bnifty\\b", "\\bsensex\\b", "\\bnse\\b", "\\bbse\\b",
+    "\\bmarket\\b", "\\btrading\\b", "\\bfinancial\\b", "\\bfinance\\b",
+    "\\bcapital gains\\b", "\\bworking capital\\b", "\\braise capital\\b", "\\bequity capital\\b",
+    "\\bliquidity\\b", "\\bcash flow\\b", "\\bbalance sheet\\b"
+  ],
+  "ambiguity_non_finance_lock_patterns": [
+    "\\blaptop\\b", "\\bamazon\\b", "\\bstore\\b", "\\brefund\\b", "\\bbroken\\b",
+    "\\bproduct\\b", "\\bshipping\\b", "\\bdefective\\b", "\\bmerchandise\\b",
+    "\\bresume\\b", "\\bcurriculum vitae\\b", "\\bcv\\b", "\\bbehance\\b", "\\bdribbble\\b",
+    "\\bwater\\b", "\\bdrink\\b", "\\bmolecule\\b", "\\bphysics\\b",
+    "\\bcapital of\\b", "\\bcapital city\\b"
+  ],
+  "ambiguity_finance_lock_return": [
+    "\\broi\\b", "\\breturn on investment\\b", "\\binvest(?:ment|ing)?\\b", "\\bstock\\b", "\\bportfolio\\b"
+  ],
+  "ambiguity_non_finance_lock_return": [
+    "\\blaptop\\b", "\\bamazon\\b", "\\bstore\\b", "\\brefund\\b", "\\bproduct\\b", "\\bbroken\\b", "\\bshipping\\b"
+  ],
+  "priority_off_topic_patterns": [
+    "\\bwhat is the capital of\\b",
+    "\\bcapital city of\\b",
+    "\\bwho is the president of\\b",
+    "\\bwho is the prime minister of\\b",
+    "\\bpopulation of (?:the )?[a-z]+\\b"
+  ],
+  "off_topic_deny_patterns": [
+    "\\brecipe\\b", "\\bcook(ing)?\\b", "\\bpasta\\b", "\\bbake\\b",
+    "\\bmovie\\b", "\\bfilm\\b", "\\bnetflix\\b", "\\boskar\\b",
+    "\\bpython code\\b", "\\bwrite (?:me )?(?:a )?code\\b", "\\bdebug (?:my )?code\\b",
+    "\\bjavascript\\b", "\\breact component\\b",
+    "\\belection\\b", "\\bpolitic(s|al)?\\b", "\\bparliament\\b",
+    "\\bmedical advice\\b", "\\bdiagnos(e|is)\\b", "\\bprescri(be|ption)\\b",
+    "\\btell (?:me )?(?:a )?joke\\b", "\\bfunny joke\\b",
+    "\\broleplay\\b", "\\brole play\\b", "\\bpretend to be\\b",
+    "\\bwho won (?:the )?(?:world cup|oscar|election)\\b"
+  ],
+  "jailbreak_deny_patterns": [
+    "ignore (?:your |all )?(?:previous |prior )?instructions",
+    "disregard (?:your |the )?(?:rules|guidelines|policy)",
+    "forget (?:your |the )?(?:rules|guidelines)",
+    "you are now (?:in )?(?:dan|developer) mode",
+    "\\bjailbreak\\b",
+    "bypass (?:your |the )?(?:safety|guardrails|filters)",
+    "act as (?:an? )?(?:unrestricted|unfiltered) (?:ai|assistant|model)",
+    "no (?:rules|restrictions|limits) apply",
+    "override (?:your |the )?system prompt",
+    "pretend (?:you are|to be) (?:not )?(?:an ai|a human|unrestricted)"
+  ],
+  "investment_trigger_patterns": [
+    "\\binvest(?:ment|ing)?\\b", "\\bportfolio\\b", "\\bstock\\b", "\\bshares?\\b",
+    "\\bmutual fund\\b", "\\betf\\b", "\\bbond\\b", "\\btrading\\b", "\\btrade\\b",
+    "\\bdividend\\b", "\\bcapital gains\\b", "\\basset allocation\\b", "\\bsip\\b"
+  ],
+  "finance_anchor_examples": [
+    "What is a mutual fund expense ratio?",
+    "How does RBI repo rate affect home loan EMIs?",
+    "Explain the difference between NSE and BSE.",
+    "What is included on a company balance sheet?",
+    "How is short-term capital gains tax calculated in India?",
+    "What does SEBI regulate?",
+    "How do I improve my credit score for a personal loan?",
+    "What is dollar-cost averaging for index investing?"
+  ],
+  "off_topic_anchor_examples": [
+    "Write a Python script to scrape websites.",
+    "Give me a recipe for chocolate cake.",
+    "Who won the best picture Oscar last year?",
+    "Tell me a funny joke about cats.",
+    "What are the symptoms of the flu?",
+    "Explain quantum physics for beginners.",
+    "Help me plan a vacation itinerary in Japan.",
+    "Write a poem about the ocean."
+  ],
+  "embedding": {
+    "finance_similarity_threshold": 0.42,
+    "off_topic_similarity_threshold": 0.40,
+    "similarity_margin": 0.03,
+    "borderline_low": 0.38,
+    "borderline_high": 0.48
+  },
+  "llm_min_confidence": 0.55
+}

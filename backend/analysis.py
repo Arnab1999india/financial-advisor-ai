@@ -1,54 +1,51 @@
-import pandas as pd
-from fastapi import UploadFile
-import tabula
 import io
+
+import pandas as pd
+import tabula
+from fastapi import UploadFile
 
 from strategies import STRATEGIES
 
-def load_data_from_file(file: UploadFile) -> pd.DataFrame:
-    """
-    Loads data from an uploaded file (CSV, XLS, or PDF) into a pandas DataFrame,
-    and performs basic data cleaning.
-    """
-    file_extension = file.filename.split('.')[-1].lower()
 
-    if file_extension == 'csv':
-        df = pd.read_csv(file.file)
-    elif file_extension in ['xls', 'xlsx']:
-        df = pd.read_excel(file.file)
-    elif file_extension == 'pdf':
-        # For PDF, we need to save it temporarily to use tabula
+def load_data_from_bytes(ext: str, data: bytes) -> pd.DataFrame:
+    """Load OHLC data from validated bytes (CSV, XLS, XLSX, PDF, TXT-as-CSV)."""
+    ext = ext.lower()
+    buffer = io.BytesIO(data)
+
+    if ext == "csv" or ext == "txt":
+        df = pd.read_csv(buffer)
+    elif ext in {"xls", "xlsx"}:
+        df = pd.read_excel(buffer)
+    elif ext == "pdf":
         with open("temp.pdf", "wb") as f:
-            f.write(file.file.read())
-        tables = tabula.read_pdf("temp.pdf", pages='all', multiple_tables=True)
+            f.write(data)
+        tables = tabula.read_pdf("temp.pdf", pages="all", multiple_tables=True)
         if not tables:
             raise ValueError("No tables found in the PDF file.")
         df = tables[0]
     else:
-        raise ValueError(f"Unsupported file format: {file_extension}")
+        raise ValueError(f"Unsupported file format: {ext}")
 
-    # Standardize column names to be case-insensitive and stripped
     df.rename(columns=lambda c: c.strip().capitalize(), inplace=True)
 
-    # --- Data Cleaning ---
-    required_columns = ['Date', 'Open', 'High', 'Low', 'Close']
+    required_columns = ["Date", "Open", "High", "Low", "Close"]
     if not all(col in df.columns for col in required_columns):
         raise ValueError(f"Input data must contain the following columns: {required_columns}")
-    
-    # Ensure numeric types for OHLC columns, coercing errors will result in NaN
-    for col in ['Open', 'High', 'Low', 'Close']:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-    
-    # Drop rows with missing values in key columns
-    df.dropna(subset=required_columns, inplace=True)
-    
-    # Ensure 'Date' column is in datetime format
-    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-    
-    # Drop rows where date conversion failed
-    df.dropna(subset=['Date'], inplace=True)
 
+    for col in ["Open", "High", "Low", "Close"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    df.dropna(subset=required_columns, inplace=True)
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df.dropna(subset=["Date"], inplace=True)
     return df
+
+
+def load_data_from_file(file: UploadFile) -> pd.DataFrame:
+    """Legacy loader — prefer validate_upload + load_data_from_bytes in the API layer."""
+    file_extension = file.filename.split(".")[-1].lower()
+    raw = file.file.read()
+    return load_data_from_bytes(file_extension, raw)
 
 
 def run_analysis(df: pd.DataFrame, strategy_name: str, data_type: str) -> dict:
@@ -78,5 +75,5 @@ def run_analysis(df: pd.DataFrame, strategy_name: str, data_type: str) -> dict:
         "strategy": strategy_name,
         "data_type": data_type,
         "buy_signals": buy_signals,
-        "sell_signals": sell_signals
+        "sell_signals": sell_signals,
     }

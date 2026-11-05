@@ -19,6 +19,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from agents.state import AgentState
 from config import settings
 from logger import logger
+from agents.llm_client import invoke_llm
 from telemetry import make_token_event
 from tools.web_search import format_web_context, search_web
 
@@ -55,9 +56,27 @@ def _content_tokens(text: str) -> set[str]:
     }
 
 
+_PERIOD_MA = re.compile(
+    r"\b(\d{1,3})\s*(?:-|period\s+|day\s+|week\s+)?mov(?:ing)?\s+averag\w*",
+    re.IGNORECASE,
+)
+
+
+def _period_moving_average_query(query: str) -> str | None:
+    match = _PERIOD_MA.search(query or "")
+    return match.group(1) if match else None
+
+
 def heuristic_docs_answer_query(query: str, docs: list[dict]) -> bool:
     """Lexical overlap check used when Flash is unavailable."""
     if not docs:
+        return False
+    period = _period_moving_average_query(query)
+    if period:
+        for doc in docs:
+            blob = f"{doc.get('question', '')} {doc.get('answer', '')}".lower()
+            if period in blob and "moving average" in blob:
+                return True
         return False
     q_tokens = _content_tokens(query)
     if not q_tokens:
@@ -94,7 +113,7 @@ def _parse_yes_no(text: str) -> bool:
 
 def grade_documents_node(state: AgentState) -> dict:
     """Flash grader: do the current FAISS docs actually answer the query?"""
-    query = (state.get("query") or "").strip()
+    query = (state.get("finance_query") or state.get("query") or "").strip()
     docs = state.get("retrieved_docs") or []
 
     if not docs:
@@ -114,8 +133,10 @@ def grade_documents_node(state: AgentState) -> dict:
             f"Question:\n{query}\n\nRetrieved documents:\n{_format_docs_for_grade(docs)}\n\n"
             "Do these documents answer the question? yes or no:"
         )
-        response = _get_cheap_llm().invoke(
-            [SystemMessage(content=_GRADE_SYSTEM), HumanMessage(content=user)]
+        response = invoke_llm(
+            _get_cheap_llm(),
+            [SystemMessage(content=_GRADE_SYSTEM), HumanMessage(content=user)],
+            node="grade_documents",
         )
         relevant = _parse_yes_no(response.content or "")
         grade = "relevant" if relevant else "not_relevant"
@@ -132,7 +153,7 @@ def grade_documents_node(state: AgentState) -> dict:
 
 def query_rewrite_node(state: AgentState) -> dict:
     """Rephrase the question for a second FAISS pass."""
-    original = (state.get("query") or "").strip()
+    original = (state.get("finance_query") or state.get("query") or "").strip()
     current = (state.get("retrieval_query") or original).strip()
     attempts = int(state.get("rewrite_attempts") or 0) + 1
     rewritten = current
@@ -150,8 +171,10 @@ def query_rewrite_node(state: AgentState) -> dict:
                 f"Previous search query: {current}\n"
                 "Rewritten search query:"
             )
-            response = _get_cheap_llm().invoke(
-                [SystemMessage(content=_REWRITE_SYSTEM), HumanMessage(content=user)]
+            response = invoke_llm(
+                _get_cheap_llm(),
+                [SystemMessage(content=_REWRITE_SYSTEM), HumanMessage(content=user)],
+                node="query_rewrite",
             )
             token_calls.append(make_token_event("query_rewrite", settings.cheap_model, response))
             candidate = (response.content or "").strip().strip('"').splitlines()[0].strip()
@@ -174,18 +197,34 @@ def query_rewrite_node(state: AgentState) -> dict:
 
 def web_search_node(state: AgentState) -> dict:
     """Fill context from Tavily or DuckDuckGo when FAISS cannot answer."""
+    from rate_limit.limiter import rate_limiter
+
+    subject = (state.get("user_id") or "anonymous").strip()
+    web_limit = rate_limiter.record_web_search(subject)
+    if not web_limit.allowed:
+        logger.warning("Web search rate limit hit for subject=%s", subject)
+        return {
+            "context": "",
+            "retrieved_docs": [],
+            "source_questions": [],
+            "retrieval_source": "web",
+            "retrieval_grade": "not_relevant",
+            "error": "web_rate_limited",
+        }
+
     query = (state.get("retrieval_query") or state.get("query") or "").strip()
     hits = search_web(query)
     context = format_web_context(hits)
     source_questions = [h["title"] for h in hits if h.get("title")]
 
     if not context:
-        logger.warning("Web search returned no usable context.")
+        logger.warning("Web search returned no usable allow-listed context.")
         return {
-            "context": state.get("context") or "",
-            "source_questions": state.get("source_questions") or [],
+            "context": "",
+            "retrieved_docs": [],
+            "source_questions": [],
             "retrieval_source": "web",
-            "retrieval_grade": "relevant",
+            "retrieval_grade": "not_relevant",
         }
 
     logger.info("Web search context built from %d hit(s).", len(hits))
@@ -212,11 +251,13 @@ def web_search_node(state: AgentState) -> dict:
 
 
 def dispatch_retrieval_grade(state: AgentState) -> str:
-    """Route after grading: generate, rewrite+retrieve, or web search."""
+    """Route after grading: KB hit → generate path; else rewrite once; else Step 2 refusal."""
     grade = state.get("retrieval_grade") or "relevant"
     if grade == "relevant":
         return "generate"
     attempts = int(state.get("rewrite_attempts") or 0)
     if attempts < settings.max_query_rewrites:
         return "rewrite"
+    if settings.strict_two_step_kb_only:
+        return "kb_missing"
     return "web_search"

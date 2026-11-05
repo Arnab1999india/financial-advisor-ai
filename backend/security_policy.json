@@ -1,0 +1,56 @@
+{
+  "injection_refusal_message": "I can't process that request because it conflicts with safety rules. Please ask a finance-related question in plain language.",
+  "injection_log_max_chars": 120,
+  "abuse_score_threshold": 5,
+  "allowed_languages": ["en", "hinglish"],
+  "output_link_allow_domains": [
+    "rbi.org.in",
+    "sebi.gov.in",
+    "nseindia.com",
+    "bseindia.com",
+    "incometax.gov.in",
+    "finance.yahoo.com"
+  ],
+  "ingestion_injection_patterns": [
+    "ignore\\s+(?:all\\s+)?(?:previous\\s+)?instructions",
+    "disregard\\s+(?:your\\s+)?(?:rules|guidelines|policy)",
+    "you\\s+are\\s+now",
+    "system\\s+prompt",
+    "reveal\\s+(?:the\\s+)?(?:system|hidden|secret)",
+    "act\\s+as\\s+(?:an\\s+)?(?:unrestricted|admin|developer)",
+    "jailbreak",
+    "developer\\s+mode",
+    "<\\s*script",
+    "<!--\\s*ignore",
+    "base64\\s*:",
+    "new\\s+instruction\\s*:"
+  ],
+  "query_injection_patterns": [
+    "ignore\\s+(?:all\\s+)?(?:previous\\s+)?instructions",
+    "disregard\\s+(?:your\\s+)?(?:rules|guidelines)",
+    "forget\\s+(?:your\\s+)?(?:rules|instructions)",
+    "show\\s+(?:me\\s+)?(?:your\\s+)?system\\s+prompt",
+    "print\\s+(?:the\\s+)?(?:system|hidden)\\s+prompt",
+    "reveal\\s+(?:api\\s+)?key",
+    "what\\s+are\\s+your\\s+(?:hidden\\s+)?rules",
+    "you\\s+are\\s+now\\s+(?:dan|developer)",
+    "jailbreak",
+    "bypass\\s+(?:safety|guardrails|filters)",
+    "act\\s+as\\s+(?:unrestricted|unfiltered)",
+    "pretend\\s+(?:you\\s+are|to\\s+be)\\s+(?:not\\s+)?(?:an\\s+)?ai",
+    "roleplay\\s+as\\s+(?:admin|developer|system)",
+    "instructions\\s+uda\\s+do",
+    "system\\s+prompt\\s+batao",
+    "rules\\s+bhool\\s+jao",
+    "pehle\\s+wale\\s+instructions\\s+mat\\s+follow\\s+karo"
+  ],
+  "prompt_exfiltration_patterns": [
+    "system\\s+prompt",
+    "developer\\s+message",
+    "hidden\\s+rules",
+    "api\\s*key",
+    "gemini_api",
+    "tool\\s+names?",
+    "internal\\s+config"
+  ]
+}
