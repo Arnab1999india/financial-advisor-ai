@@ -4,11 +4,21 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 import pytest
 import pandas as pd
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
+import main
 from main import app
+from rate_limit.limiter import RateLimitDecision
 
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _disable_upload_rate_limit():
+    with patch.object(main.rate_limiter, "check_upload", return_value=RateLimitDecision(True)):
+        yield
 
 @pytest.fixture
 def sample_csv_file():

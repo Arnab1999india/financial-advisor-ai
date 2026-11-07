@@ -313,6 +313,7 @@ async def chat(body: QueryRequest, request: Request) -> QueryResponse:
         if cached is not None:
             timer.finish(cache_hit=True, extra={"cache_type": "exact"})
             token_tracker.record_request([], cache_hit=True)
+            rate_limiter.release_inflight(body.user_id)
             return cached
         if financial_retriever.is_ready:
             try:
@@ -321,6 +322,7 @@ async def chat(body: QueryRequest, request: Request) -> QueryResponse:
                 if semantic_hit is not None:
                     timer.finish(cache_hit=True, extra={"cache_type": "semantic"})
                     token_tracker.record_request([], cache_hit=True)
+                    rate_limiter.release_inflight(body.user_id)
                     return semantic_hit
             except Exception:
                 pass
@@ -454,6 +456,7 @@ async def chat_stream(body: QueryRequest, request: Request) -> StreamingResponse
 
     cached = try_cache_hit(body, is_cacheable=is_cacheable, cache_key=cache_key, timer=timer)
     if cached is not None:
+        rate_limiter.release_inflight(body.user_id)
         return StreamingResponse(stream_cached_response(cached), media_type="text/event-stream", headers=headers)
 
     return StreamingResponse(
@@ -561,12 +564,12 @@ async def analyze(
         )
         df = load_data_from_bytes(ext, raw)
         result = run_analysis(df, strategy, data_type)
-        if symbol and symbol.strip():
-            result["symbol"] = symbol.strip().upper()
-        if exchange and exchange.strip():
-            result["exchange"] = exchange.strip().upper()
-        if data_interval and data_interval.strip():
-            result["data_interval"] = data_interval.strip()
+        _analysis_metadata(
+            result,
+            symbol=symbol,
+            exchange=exchange,
+            data_interval=data_interval,
+        )
         logger.info("Analysis complete — strategy=%s", strategy)
         return AnalysisResponse(**result)
     except UploadValidationError as exc:
@@ -575,6 +578,85 @@ async def analyze(
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         logger.error("Analysis error: %s", exc)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+def _analysis_metadata(
+    result: dict,
+    *,
+    symbol: str | None,
+    exchange: str | None,
+    data_interval: str | None,
+) -> dict:
+    if symbol and symbol.strip():
+        result["symbol"] = symbol.strip().upper()
+    if exchange and exchange.strip():
+        result["exchange"] = exchange.strip().upper()
+    if data_interval and data_interval.strip():
+        result["data_interval"] = data_interval.strip()
+    return result
+
+
+@app.post("/analyze/batch", response_model=list[AnalysisResponse], tags=["Analysis"])
+async def analyze_batch(
+    request: Request,
+    file: UploadFile = File(..., description="CSV, XLS, XLSX, or PDF with OHLC data"),
+    strategies: str = Form(..., description="Comma-separated trading strategy keys"),
+    data_type: str = Form(..., description="Data type hint (e.g. 'swing', 'intraday')"),
+    symbol: str | None = Form(None, description="Instrument symbol (metadata for the run)"),
+    exchange: str | None = Form(None, description="Exchange id, e.g. NSE or BSE"),
+    data_interval: str | None = Form(None, description="Expected candle interval label"),
+) -> list[AnalysisResponse]:
+    """Run multiple strategies on one uploaded file (single upload rate-limit slot)."""
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    client_ip = request.client.host if request.client else "unknown"
+    upload_decision = rate_limiter.check_upload(client_ip)
+    if not upload_decision.allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many upload requests. Please wait and try again.",
+            headers={"Retry-After": str(max(upload_decision.retry_after_seconds, 1)), "X-Request-ID": request_id},
+        )
+
+    strategy_list = list(dict.fromkeys(s.strip() for s in strategies.split(",") if s.strip()))
+    if not strategy_list:
+        raise HTTPException(status_code=400, detail="At least one strategy is required.")
+
+    logger.info(
+        "Batch analysis — strategies=%s data_type=%s symbol=%s exchange=%s interval=%s request_id=%s",
+        strategy_list,
+        data_type,
+        symbol,
+        exchange,
+        data_interval,
+        request_id,
+    )
+
+    try:
+        ext, raw = validate_upload(
+            file,
+            max_bytes=settings.upload_max_bytes,
+            max_pdf_pages=settings.upload_max_pdf_pages,
+        )
+        df = load_data_from_bytes(ext, raw)
+        responses: list[AnalysisResponse] = []
+        for strategy in strategy_list:
+            result = run_analysis(df, strategy, data_type)
+            _analysis_metadata(
+                result,
+                symbol=symbol,
+                exchange=exchange,
+                data_interval=data_interval,
+            )
+            responses.append(AnalysisResponse(**result))
+        logger.info("Batch analysis complete — count=%s", len(responses))
+        return responses
+    except UploadValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error("Batch analysis error: %s", exc)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

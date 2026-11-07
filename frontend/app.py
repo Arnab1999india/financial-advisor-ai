@@ -217,36 +217,34 @@ def _run_signals_analysis() -> None:
 
     progress = st.progress(0.0, text="Starting…")
     st.session_state.signals_last_results = []
-    errors: list[str] = []
+    had_error = False
 
-    for i, strategy in enumerate(indicators, start=1):
-        progress.progress(i / len(indicators), text=f"Processing {strategy} ({i}/{len(indicators)})")
-        files = {"file": (filename, io.BytesIO(file_bytes), file_type)}
-        data = {"strategy": strategy, **form_meta}
+    files = {"file": (filename, io.BytesIO(file_bytes), file_type)}
+    data = {"strategies": ",".join(indicators), **form_meta}
 
-        try:
-            res = requests.post(f"{API_BASE_URL}/analyze", files=files, data=data, timeout=120)
-            if res.status_code != 200:
-                detail = f"HTTP {res.status_code}"
-                try:
-                    err_payload = res.json()
-                    if "detail" in err_payload:
-                        detail = err_payload["detail"]
-                except Exception:
-                    pass
-                errors.append(f"{strategy}: {detail}")
-                continue
-
-            st.session_state.signals_last_results.append(res.json())
-        except Exception as exc:
-            errors.append(f"{strategy}: {exc}")
+    try:
+        progress.progress(0.5, text=f"Processing {len(indicators)} indicator(s)…")
+        res = requests.post(f"{API_BASE_URL}/analyze/batch", files=files, data=data, timeout=300)
+        if res.status_code != 200:
+            had_error = True
+            detail = f"HTTP {res.status_code}"
+            try:
+                err_payload = res.json()
+                if "detail" in err_payload:
+                    detail = err_payload["detail"]
+            except Exception:
+                pass
+            st.error(detail)
+        else:
+            st.session_state.signals_last_results = res.json()
+    except Exception as exc:
+        had_error = True
+        st.error(str(exc))
 
     progress.empty()
-    for msg in errors:
-        st.error(msg)
     if st.session_state.signals_last_results:
         st.success("Done.")
-    elif not errors:
+    elif not had_error:
         st.warning("No results returned.")
 
 _CHAT_INPUT = components.declare_component(
@@ -738,6 +736,10 @@ with tab_signals:
         st.session_state.signals_upload_bytes = uploaded_file.getvalue()
         st.session_state.signals_upload_name = uploaded_file.name
         st.session_state.signals_upload_type = uploaded_file.type or "application/octet-stream"
+    else:
+        st.session_state.signals_upload_bytes = None
+        st.session_state.signals_upload_name = ""
+        st.session_state.signals_upload_type = "application/octet-stream"
 
     if st.session_state.signals_upload_name:
         st.caption(f"Selected file: **{st.session_state.signals_upload_name}**")
